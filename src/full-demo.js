@@ -172,14 +172,14 @@ function makeRecordPanel(screenId, title, records, kind, describe) {
     const copy = document.createElement('div');
     copy.className = 'full-demo-record-copy';
     const name = document.createElement('strong');
-    name.textContent = record.title || record.name || record.customer || record.ocsId || 'Elemento demo';
+    name.textContent = record.title || record.name || record.customer || record.ocsId || record.label || record.source || 'Elemento demo';
     const detail = document.createElement('small');
     detail.textContent = describe(record);
     copy.append(name, detail);
     const actions = document.createElement('div');
     actions.className = 'actions';
     actions.append(safeButton('Ver', 'btn sm', 'view', record.id));
-    actions.append(safeButton('Editar', 'btn sm', 'edit', record.id));
+    if (formForKind[kind]) actions.append(safeButton('Editar', 'btn sm', 'edit', record.id));
     if (kind === 'claim') actions.append(safeButton(record.archived ? 'Restaurar' : 'Archivar', 'btn sm', 'archive', record.id));
     if (kind === 'task' && record.status !== 'Completada') {
       actions.append(safeButton('Completar', 'btn sm', 'complete', record.id));
@@ -195,8 +195,10 @@ function makeRecordPanel(screenId, title, records, kind, describe) {
 function addClaimRow(claim) {
   const tbody = document.querySelector('#claims tbody');
   if (!tbody) return;
-  tbody.querySelector(`[data-local-claim="${CSS.escape(claim.id)}"]`)?.remove();
-  const tr = document.createElement('tr');
+  let tr = tbody.querySelector(`[data-local-claim="${CSS.escape(claim.id)}"]`);
+  if (!tr && claim.sourceFixture) tr = [...tbody.querySelectorAll('tr:not([data-local-claim])')].find((row) => row.innerText.includes(claim.ocsId));
+  if (!tr) tr = document.createElement('tr');
+  tr.replaceChildren();
   tr.dataset.localClaim = claim.id;
   tr.dataset.open = 'claim';
   const cells = [
@@ -223,6 +225,22 @@ function addClaimRow(claim) {
   );
   tr.append(actionCell);
   tbody.append(tr);
+}
+
+function claimFromFixture(ocsId = 'OCS-26-01482') {
+  const existing = state.claims.find((claim) => claim.ocsId === ocsId);
+  if (existing) return existing;
+  const row = [...(document.querySelectorAll('#claims tbody tr'))].find((item) => item.innerText.includes(ocsId));
+  if (!row) return null;
+  const cells = [...row.cells]; const customer = (cells[0]?.innerText || 'Cliente demo').split('·')[0].trim();
+  const claim = {
+    id: `FIXTURE-${ocsId}`, ocsId, sourceFixture: true, customer, email: `${customer.toLocaleLowerCase().replace(/\s+/g, '.')}@example.invalid`,
+    lossType: cells[2]?.innerText.trim() || 'Agua', date: '2026-05-18', state: 'Florida', address: cells[0]?.innerText.trim() || '',
+    carrier: cells[3]?.innerText.trim() || 'Pendiente de asignar', assignee: cells[6]?.innerText.trim() || 'Sin asignar',
+    stage: cells[4]?.innerText.trim() || 'Intake · Demo', clientStage: cells[5]?.innerText.trim() || 'Review · Demo',
+    nextAction: cells[7]?.innerText.trim() || 'Revisar expediente demo', status: 'Abierto',
+  };
+  state.claims.push(claim); save(); return claim;
 }
 
 function render() {
@@ -257,6 +275,18 @@ function render() {
   makeRecordPanel('accounting', 'Notas de conciliación OCS', state.reconciliations, 'reconciliation', (item) => `${item.reference} · ${item.relatedClaim || 'Sin asociación'} · ${item.status}`);
   makeRecordPanel('customdata', 'Campos personalizados de demo', state.customFields, 'customfield', (item) => `${item.fieldType} · ${item.appliesTo} · local`);
   makeRecordPanel('customdata', 'Tablas agregadas localmente', state.tables || [], 'table', (item) => `${item.primaryField} · ${item.description || 'Esquema ficticio local'}`);
+  makeRecordPanel('reports', 'Reportes guardados en esta demo', state.savedReports || [], 'report', (item) => `${item.filters || 'Sin filtros'} · solo local`);
+  makeRecordPanel('backups', 'Puntos de recuperación simulados', state.backupPoints || [], 'backup', (item) => `${item.status} · sin archivos externos`);
+  makeRecordPanel('import', 'Vistas previas locales', state.importRuns || [], 'importrun', (item) => `${item.source} · ${item.status} · ${item.at ? new Date(item.at).toLocaleString() : ''}`);
+  ['workflows', 'automations'].forEach((screenId) => {
+    const entries = (state.workflowDraftItems || []).filter((item) => item.screen === screenId);
+    const old = document.querySelector(`#${screenId} .workflow-draft-note`); old?.remove();
+    if (entries.length) { const note = document.createElement('div'); note.className = 'module-note workflow-draft-note'; note.textContent = `Borrador local: ${entries.map((item) => item.label).join(' · ')}`; document.querySelector(`#${screenId} .screenhead`)?.after(note); }
+  });
+  document.querySelectorAll('#tasks .taskcard').forEach((card) => {
+    const title = card.querySelector('b')?.textContent.trim(); const assignee = state.taskAssignments?.[title];
+    if (assignee) { const owner = document.createElement('span'); owner.className = 'pill blue'; owner.textContent = 'Asignada a mí · demo'; card.querySelector('.taskfoot')?.replaceChildren(owner); }
+  });
   document.querySelectorAll('#approvals .approvalitem').forEach((item) => {
     const label = item.querySelector('b')?.textContent.trim(); const status = state.approvalStatus?.[label];
     if (status) { let badge = item.querySelector('.demo-approval-status'); if (!badge) { badge = document.createElement('span'); badge.className = 'pill blue demo-approval-status'; item.querySelector('.row')?.append(badge); } badge.textContent = status; }
@@ -268,6 +298,9 @@ function render() {
   const claimSummary = document.querySelector('#claims .row.mt .smalltxt');
   if (claimSummary) claimSummary.textContent = `Showing ${total ? 1 : 0}–${total} of ${total} · Página local · Demo`;
   applyClaimColumns();
+  applyCustomDataColumns();
+  renderCalendarMonth();
+  if (state.uiViews?.dashboard) applyDashboardQueue(state.uiViews.dashboard);
   if (state.claimSort) sortClaimRows();
   if (state.claimFilter) applyClaimFilter(state.claimFilter);
   const groupButton = [...document.querySelectorAll('#claims .boardhead button.filter')].find((button) => /group/i.test(button.textContent));
@@ -275,9 +308,32 @@ function render() {
   const sortButton = [...document.querySelectorAll('#claims .boardhead button.filter')].find((button) => /sort/i.test(button.textContent));
   if (sortButton && state.claimSort) sortButton.textContent = `↕ Sort ${state.claimSort === 'asc' ? 'A–Z' : 'Z–A'}`;
   applyClaimPagination();
+  if (state.moduleSorts?.customer === 'oldest') {
+    const body = document.querySelector('#customer tbody'); if (body) [...body.rows].reverse().forEach((row) => body.append(row));
+  }
   renderSavedClaimViews();
   renderSavedDataViews();
   renderAiMessages();
+  renderTemplateMappings();
+  renderEmailWorkspace();
+  const importNote = document.querySelector('#import .saved-mapping-note');
+  if (state.importMapping) {
+    const note = importNote || document.createElement('p'); note.className = 'module-note saved-mapping-note';
+    note.textContent = `Mapeo ${state.importMapping.status} · ${state.importMapping.source}`; document.querySelector('#import .screenhead')?.after(note);
+  }
+  if (state.importSource) document.querySelectorAll('#import .pagecols .card.flat.center').forEach((card) => card.classList.toggle('source-selected', card.querySelector('b')?.textContent.trim() === state.importSource));
+  const offlineNote = document.querySelector('#offline .saved-offline-note');
+  if (state.offlinePolicy) { const note = offlineNote || document.createElement('p'); note.className = 'module-note saved-offline-note'; note.textContent = state.offlinePolicy.status; document.querySelector('#offline .screenhead')?.after(note); }
+  const visibilityNote = document.querySelector('#viewer .saved-visibility-note');
+  if (state.viewerVisibility) { const note = visibilityNote || document.createElement('p'); note.className = 'module-note saved-visibility-note'; note.textContent = `Visibilidad local: ${state.viewerVisibility} · sin publicar`; document.querySelector('#viewer .screenhead')?.after(note); }
+  const viewerPage = document.querySelector('#viewer .card[style*="background:#e9e9eb"] > div[style*="background:#fff"]');
+  if (viewerPage) viewerPage.style.transform = `scale(${Number(state.viewerZoom || 1)}) rotate(${Number(state.viewerRotation || 0)}deg)`;
+  const reminder = state.signatureReminderAt;
+  if (reminder) { const status = document.querySelector('#signatures tbody tr .pill'); if (status) status.textContent = `Recordatorio simulado · ${new Date(reminder).toLocaleString()}`; }
+  Object.entries(state.emailMatches || {}).forEach(([threadName, claimId]) => {
+    const thread = [...document.querySelectorAll('#email .mailthread')].find((item) => item.querySelector('b')?.textContent.trim() === threadName);
+    if (thread) { let badge = thread.querySelector('.demo-match-status'); if (!badge) { badge = document.createElement('small'); badge.className = 'demo-match-status'; thread.append(badge); } badge.textContent = `Asociado a ${claimId} · demo`; }
+  });
   if (state.agency) applyAgency(state.agency);
   const languageButton = [...document.querySelectorAll('.topright button.tinybtn')].find((button) => /^(ES|EN)⌄?$/.test(button.textContent.trim()));
   if (languageButton) {
@@ -318,6 +374,72 @@ function renderSavedDataViews() {
     const button = document.createElement('button'); button.type = 'button'; button.dataset.savedDataView = view.id;
     button.textContent = view.name; list.insertBefore(button, [...list.querySelectorAll('button')].find((item) => /create view/i.test(item.textContent)) || null);
   });
+}
+
+function renderTemplateMappings() {
+  const screen = document.getElementById('templates');
+  const container = screen?.querySelector('.mappingrow')?.parentElement;
+  if (!container) return;
+  container.querySelectorAll('.mappingrow[data-local-mapping]').forEach((row) => row.remove());
+  (state.templateMappings || []).forEach((mapping) => {
+    const row = document.createElement('div'); row.className = 'mappingrow'; row.dataset.localMapping = 'true';
+    const name = document.createElement('input'); name.placeholder = 'Nombre del campo PDF'; name.setAttribute('aria-label', 'Nombre del campo PDF'); name.value = mapping.pdfField || '';
+    const arrow = document.createElement('span'); arrow.textContent = '→';
+    const select = document.createElement('select'); select.setAttribute('aria-label', 'Campo OCS asociado');
+    ['Policyholder · display name', 'Loss address', 'Loss date', 'Carrier claim number'].forEach((value) => { const option = document.createElement('option'); option.textContent = value; option.selected = value === mapping.ocsField; select.append(option); });
+    row.append(name, arrow, select); container.append(row);
+  });
+}
+
+function renderEmailWorkspace() {
+  const screen = document.getElementById('email'); if (!screen) return;
+  const list = screen.querySelector('.mailmid'); if (!list) return;
+  list.querySelectorAll('.mailthread[data-local-thread]').forEach((row) => row.remove());
+  (state.communications || []).forEach((item) => {
+    const row = document.createElement('div'); row.className = 'mailthread'; row.dataset.localThread = item.id; row.dataset.threadName = item.title;
+    const title = document.createElement('b'); title.textContent = item.title || 'Borrador local';
+    const content = document.createElement('p'); content.textContent = `${item.contact || 'Contacto ficticio'} · ${item.content || ''}`;
+    const meta = document.createElement('small'); meta.textContent = `${item.status || 'Borrador local'} · no enviado`;
+    row.append(title, content, meta); list.append(row);
+  });
+  const threads = [...list.querySelectorAll('.mailthread')];
+  threads.forEach((row) => { row.setAttribute('role', 'button'); row.setAttribute('tabindex', '0'); row.style.cursor = 'pointer'; });
+  const selectedName = state.activeEmail || threads[0]?.querySelector('b')?.textContent.trim() || '';
+  const folder = state.emailFolder || 'Inbox';
+  const folderMatchers = {
+    Inbox: () => true,
+    Starred: (row) => row.dataset.starred === 'true',
+    Sent: (row) => row.dataset.localThread && /Aprobado|Enviado/i.test(row.innerText),
+    Drafts: (row) => Boolean(row.dataset.localThread),
+    'Needs matching': (row) => /possible match|no claim created|match 7\d%|2 claims/i.test(row.innerText),
+    'Unrelated emails': (row) => /no claim created/i.test(row.innerText),
+    Archived: (row) => row.dataset.archived === 'true',
+  };
+  threads.forEach((row) => {
+    const name = row.querySelector('b')?.textContent.trim() || row.dataset.threadName;
+    row.classList.toggle('sel', name === selectedName);
+    row.hidden = !folderMatchers[folder]?.(row) && folder !== 'Inbox';
+  });
+  let empty = list.querySelector('.mail-folder-empty');
+  if (!threads.some((row) => !row.hidden)) {
+    if (!empty) { empty = document.createElement('p'); empty.className = 'smalltxt mail-folder-empty'; empty.setAttribute('role', 'status'); list.append(empty); }
+    empty.textContent = folder === 'Sent' ? 'No se envió ningún correo real desde esta demo.' : `No hay mensajes sintéticos en “${folder}”.`;
+  } else empty?.remove();
+  const firstThread = threads.find((row) => !row.hidden && (row.querySelector('b')?.textContent.trim() || row.dataset.threadName) === selectedName) || threads.find((row) => !row.hidden);
+  if (firstThread) {
+    state.activeEmail = firstThread.querySelector('b')?.textContent.trim() || firstThread.dataset.threadName;
+    firstThread.classList.add('sel');
+    const title = firstThread.querySelector('b')?.textContent.trim() || 'Borrador de demo';
+    const summary = firstThread.querySelector('p')?.textContent.trim() || 'Mensaje sintético de demostración.';
+    const content = screen.querySelector('.mailcontent');
+    const heading = content?.querySelector('h3'); if (heading) heading.textContent = title;
+    const body = content?.querySelector(':scope > p'); if (body) body.textContent = `${summary}\n\nContenido sintético para revisión local. Ningún mensaje se envió.`;
+    const matchButton = [...(content?.querySelectorAll('button') || [])].find((button) => /change claim/i.test(button.innerText));
+    if (matchButton) matchButton.dataset.emailId = state.activeEmail;
+  }
+  const folderHeader = list.querySelector('.mailmidhead');
+  if (folderHeader) { const text = [...folderHeader.childNodes].find((node) => node.nodeType === Node.TEXT_NODE); if (text) text.textContent = `${folder} · ${state.selectedMailbox || 'claims@example.invalid'} `; }
+  screen.querySelectorAll('.mailbox').forEach((item) => item.classList.toggle('active', item.textContent.replace(/[●○]/g, '').trim().split(/\s+\d+$/)[0] === folder || item.textContent.includes(state.selectedMailbox || 'claims@example.invalid')));
 }
 
 function openDataViewDialog() {
@@ -385,6 +507,50 @@ function applyClaimColumns() {
   document.querySelectorAll('#claims table tr').forEach((row) => [...row.children].forEach((cell, index) => {
     cell.style.display = hidden.has(index) ? 'none' : '';
   }));
+}
+
+function applyCustomDataColumns() {
+  const hidden = new Set(state.hiddenCustomColumns || []);
+  document.querySelectorAll('#customdata .tablewrap table tr').forEach((row) => [...row.children].forEach((cell, index) => {
+    cell.style.display = hidden.has(index) ? 'none' : '';
+  }));
+}
+
+function renderCalendarMonth() {
+  const screen = document.getElementById('calendar'); const table = screen?.querySelector('.tablewrap table'); const tbody = table?.querySelector('tbody');
+  if (!tbody) return;
+  const offset = Number(state.calendarOffset || 0); const firstDay = new Date(2026, 9 + offset, 1); const gridStart = new Date(2026, 9 + offset, 1 - firstDay.getDay());
+  const events = offset === 0 ? { 15: 'LOR due', 19: 'Inspection 2:30 · Carrier call 4:00', 20: 'Chen inspection', 22: 'Recorded statement' } : {};
+  tbody.replaceChildren();
+  for (let week = 0; week < 6; week++) {
+    const row = document.createElement('tr');
+    for (let day = 0; day < 7; day++) {
+      const date = new Date(gridStart); date.setDate(gridStart.getDate() + week * 7 + day);
+      const cell = document.createElement('td'); cell.dataset.date = date.toISOString().slice(0, 10); cell.textContent = String(date.getDate());
+      if (date.getMonth() !== firstDay.getMonth()) cell.style.color = '#a1a1a6';
+      if (offset === 0 && date.getDate() === 19 && date.getMonth() === firstDay.getMonth()) cell.style.cssText += ';background:#f7f5ff;border-radius:7px';
+      if (events[date.getDate()] && date.getMonth() === firstDay.getMonth()) { const badge = document.createElement('span'); badge.className = 'pill violet'; badge.textContent = events[date.getDate()]; cell.append(document.createElement('br'), badge); }
+      row.append(cell);
+    }
+    tbody.append(row);
+  }
+  const title = screen.querySelector('.cardtitle'); if (title) title.textContent = firstDay.toLocaleDateString('es', { month: 'long', year: 'numeric' });
+  const today = screen.querySelector('.thirdcol .cardtitle'); if (today) today.textContent = offset === 0 ? 'Today · Oct 19' : 'Eventos del mes';
+}
+
+function applyDashboardQueue(label = '') {
+  const normalized = label.toLocaleLowerCase();
+  const rows = [...document.querySelectorAll('#dashboard .card.span2 .tablewrap tbody tr')];
+  const predicate = normalized.includes('carrier') ? (row) => /carrier/i.test(row.innerText)
+    : normalized.includes('cliente') || normalized.includes('customer') ? (row) => /cliente|customer|photo/i.test(row.innerText)
+      : normalized.includes('míos') || normalized.includes('my') ? (row) => /alex parker|a\. parker|jordan rivera|j\. rivera/i.test(row.innerText)
+        : () => true;
+  rows.forEach((row) => { row.hidden = !predicate(row); });
+  let empty = document.querySelector('#dashboard .dashboard-queue-empty');
+  if (rows.length && !rows.some((row) => !row.hidden)) {
+    if (!empty) { empty = document.createElement('p'); empty.className = 'smalltxt dashboard-queue-empty'; empty.setAttribute('role', 'status'); document.querySelector('#dashboard .queueTabs')?.after(empty); }
+    empty.textContent = `No hay claims ficticios en la vista “${label}”.`;
+  } else empty?.remove();
 }
 
 function applyClaimPagination() {
@@ -636,6 +802,11 @@ const formMarkup = {
     ['title', 'Nombre de la tabla', 'text', true, ''], ['primaryField', 'Campo principal', 'text', true, 'Nombre'],
     ['description', 'Descripción local', 'text', false, 'Tabla ficticia para esta demo'],
   ] },
+  'new-report': { title: 'Editar reporte guardado', kind: 'report', fields: [
+    ['title', 'Nombre del reporte', 'text', true, 'Reporte de desempeño · demo'],
+    ['filters', 'Filtros guardados', 'text', false, 'Todos los claims ficticios'],
+    ['description', 'Descripción', 'textarea', false, ''],
+  ] },
   'new-role': { title: 'Crear rol de demo', kind: 'role', fields: [
     ['title', 'Nombre del rol', 'text', true, ''], ['scope', 'Alcance ficticio', 'select', true, ['Todos los claims de demo', 'Claims asignados', 'Solo lectura']],
     ['status', 'Estado', 'select', true, ['Activo · demo', 'Pausado']],
@@ -648,8 +819,8 @@ const formMarkup = {
   ] },
 };
 
-const entityStores = { claim: 'claims', task: 'tasks', client: 'clients', event: 'events', template: 'templates', signature: 'signatures', table: 'tables', user: 'users', role: 'roles', workflow: 'workflows', document: 'documents', support: 'supportTickets', portal: 'portalEvents', communication: 'communications', reconciliation: 'reconciliations', customfield: 'customFields' };
-const formForKind = { claim: 'new-claim', task: 'new-task', client: 'new-client', event: 'new-event', template: 'new-template', signature: 'new-signature', table: 'new-table', user: 'new-user', role: 'new-role', workflow: 'new-workflow', document: 'new-document', support: 'new-support', portal: 'new-portal', communication: 'new-communication', reconciliation: 'new-reconciliation', customfield: 'new-customfield', agency: 'new-agency' };
+const entityStores = { claim: 'claims', task: 'tasks', client: 'clients', event: 'events', template: 'templates', signature: 'signatures', table: 'tables', report: 'savedReports', backup: 'backupPoints', importrun: 'importRuns', user: 'users', role: 'roles', workflow: 'workflows', document: 'documents', support: 'supportTickets', portal: 'portalEvents', communication: 'communications', reconciliation: 'reconciliations', customfield: 'customFields' };
+const formForKind = { claim: 'new-claim', task: 'new-task', client: 'new-client', event: 'new-event', template: 'new-template', signature: 'new-signature', table: 'new-table', report: 'new-report', user: 'new-user', role: 'new-role', workflow: 'new-workflow', document: 'new-document', support: 'new-support', portal: 'new-portal', communication: 'new-communication', reconciliation: 'new-reconciliation', customfield: 'new-customfield', agency: 'new-agency' };
 const collectionFor = (kind) => state[entityStores[kind]] || [];
 
 function openForm(action, record) {
@@ -737,13 +908,16 @@ function upsert(action, existing) {
   if (config.kind === 'document' && !values.fileName) values.fileName = existing?.fileName || 'archivo-demo.pdf';
   if (config.kind === 'task') values.status = existing?.status || 'Pendiente';
   if (config.kind === 'client') values.policyholders = [values.name, values.policyholder].filter(Boolean);
+  const previousName = existing?.name || '';
   const saved = { ...existing, ...values, id: existing?.id || makeId(config.kind.toUpperCase()), createdAt: existing?.createdAt || now(), updatedAt: now() };
   const index = list.findIndex((item) => item.id === saved.id);
   if (index >= 0) list[index] = saved;
   else list.unshift(saved);
+  if (config.kind === 'workflow') state.activeWorkflowId = saved.id;
   if (config.kind === 'client') {
     state.claims.forEach((claim) => {
-      if (claim.clientId === saved.id) { claim.customer = saved.name; claim.email = saved.email || ''; }
+      const linkedByName = previousName && claim.customer?.trim().toLocaleLowerCase() === previousName.trim().toLocaleLowerCase();
+      if (claim.clientId === saved.id || linkedByName) { claim.clientId = saved.id; claim.customer = saved.name; claim.email = saved.email || ''; }
     });
   }
   logActivity(existing ? `${config.kind}-updated` : `${config.kind}-created`, `${existing ? 'Actualizado' : 'Creado'} ${config.kind} demo: ${saved.title || saved.name || saved.ocsId}`, saved.id);
@@ -829,6 +1003,7 @@ function installStyles() {
     .local-row-actions{white-space:nowrap}.local-row-actions .btn{margin:2px}#dashboard .card.metric[role="button"],#dashboard .focusitem[role="button"]{cursor:pointer}#dashboard .card.metric[role="button"]:hover,#dashboard .focusitem[role="button"]:hover{outline:1px solid var(--violet3)}
     .saved-claim-views{display:flex;align-items:center;gap:6px;overflow:auto;padding:4px 0 10px;scrollbar-width:none}.saved-claim-views::-webkit-scrollbar{display:none}.demo-action-feedback{margin:10px 0;padding:11px 14px;border-color:var(--violet3);background:var(--violet2)}.demo-action-feedback strong{font-size:10px}.demo-action-feedback p{margin:4px 0 0}
     .task-list-view{display:grid!important;grid-template-columns:1fr!important}.task-list-view .boardcol{min-width:0}.task-list-view .taskcard{max-width:none}.source-selected{outline:2px solid var(--violet)!important;background:var(--violet2)!important}.folder-view-demo tbody tr{display:grid;grid-template-columns:1fr;gap:4px;border-bottom:1px solid var(--line);padding:9px}.folder-view-demo tbody td{border:0}.screen .tab[role="tab"]{cursor:pointer}.screen .tab[role="tab"]:focus-visible,.screen .subnav button:focus-visible{outline:3px solid #a89dff88;outline-offset:1px}
+    @media(min-width:621px) and (max-width:900px){.topright{max-width:calc(100vw - 516px);flex-wrap:wrap;justify-content:flex-end}.main,.page,.screen,.screen .grid,.screen .card{min-width:0;max-width:100%}.screen .grid,.screen .pagecols{grid-template-columns:minmax(0,1fr)!important}.screen .pagecols>*{min-width:0}.tablewrap{max-width:100%;overflow-x:auto;scrollbar-width:none}.tablewrap::-webkit-scrollbar{display:none}.screen .boardhead{flex-wrap:wrap}}
     @media(max-width:620px){.rail,body.sidebar-expanded .rail{display:none!important}body.mobile-nav-open:before{content:"";position:fixed;inset:0;background:#10182855;z-index:79}.nav-popover.show{position:fixed;inset:auto 0 0!important;width:auto!important;max-height:82vh!important;overflow:auto!important;padding:18px 16px 24px!important;border-radius:18px 18px 0 0!important;z-index:80}.nav-popover .mobile-sheet-head{display:flex;align-items:center;justify-content:space-between;padding:0 4px 12px;border-bottom:1px solid var(--line);margin-bottom:8px}.nav-popover .mobile-sheet-head strong{font-size:14px}.nav-popover .mobile-sheet-close{width:32px;height:32px;border:0;border-radius:50%;background:#f1f2f5;font-size:18px}.nav-popover .mobile-nav-group{border-bottom:1px solid #f0f1f5}.nav-popover .mobile-nav-group>button{height:auto;min-height:42px;justify-content:space-between;font-weight:750;font-size:10px;letter-spacing:.04em}.nav-popover .mobile-nav-group>button span:first-child{width:auto!important;flex:1;text-align:left}.nav-popover .mobile-nav-items{padding:0 0 8px}.nav-popover .mobile-nav-items button{height:auto;min-height:42px;font-size:12px}.nav-popover .mobile-nav-items[hidden]{display:none}}
     @media(max-width:620px){.full-demo-record{align-items:flex-start;flex-direction:column}.full-demo-record .actions{width:100%;flex-wrap:wrap}.local-row-actions{white-space:normal}}
   `;
@@ -852,8 +1027,13 @@ function chooseTab(tab) {
     const filter = /my work/i.test(label) ? 'My claims' : /urgent/i.test(label) ? 'Urgent' : /awaiting carrier/i.test(label) ? 'Awaiting carrier' : /archive/i.test(label) ? 'Archived' : 'All claims';
     applyClaimFilter(filter); return true;
   }
+  if (screenId === 'dashboard' && tab.closest('.queueTabs')) { applyDashboardQueue(label); toast(`Bandeja filtrada · ${label} · demo local`); return true; }
   if (screenId === 'claim') {
     if (/contacts/i.test(label)) { window.go?.('customer'); return true; }
+    if (/documents|files/i.test(label)) { window.go?.('documents'); return true; }
+    if (/tasks/i.test(label)) { window.go?.('tasks'); return true; }
+    if (/email|communication/i.test(label)) { window.go?.('email'); return true; }
+    if (/workflow|process/i.test(label)) { window.go?.('workflows'); return true; }
     const selector = /activity/i.test(label) ? '.activity' : /overview/i.test(label) ? '.detailtop' : '';
     if (selector) screen.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     else if (/financial/i.test(label)) window.go?.('accounting');
@@ -861,7 +1041,7 @@ function chooseTab(tab) {
   }
   if (screenId === 'tasks') {
     if (/calendar/i.test(label)) { window.go?.('calendar'); return true; }
-    if (/activity log/i.test(label)) { window.go?.('support'); return true; }
+    if (/activity log/i.test(label)) { screen.querySelector('.card.mt .cardtitle')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); toast('Historial de movimientos de tareas · demo local'); return true; }
     const board = screen.querySelector('.board');
     if (board) {
       board.dataset.view = /my work/i.test(label) ? 'mine' : /list/i.test(label) ? 'list' : 'board';
@@ -887,7 +1067,7 @@ function chooseTab(tab) {
   }
   if (screenId === 'customdata') {
     if (tab.closest('.subnav')) {
-      if (tab.dataset.savedDataView) { const view = (state.savedDataViews || []).find((item) => item.id === tab.dataset.savedDataView); if (view) { state.moduleFilters ||= {}; state.moduleFilters.customdata = view.query || ''; applyModuleFilter('customdata', view.query || ''); toast(`Vista “${view.name}” aplicada`); } return true; }
+      if (tab.dataset.savedDataView) { const view = (state.savedDataViews || []).find((item) => item.id === tab.dataset.savedDataView); if (view) { state.moduleFilters ||= {}; state.moduleFilters.customdata = view.query || ''; applyModuleFilter('customdata', view.query || ''); save(); toast(`Vista “${view.name}” aplicada`); } return true; }
       if (/create view/i.test(label)) { openDataViewDialog(); return true; }
       const query = /^all claims/i.test(label) ? '' : /my assigned/i.test(label) ? 'Jordan' : /awaiting carrier/i.test(label) ? 'carrier' : /urgent/i.test(label) ? 'urgent' : /closed archive/i.test(label) ? 'closed' : '';
       state.moduleFilters ||= {}; state.moduleFilters.customdata = query; applyModuleFilter('customdata', query); toast(`Vista guardada aplicada · ${label}`); return true;
@@ -950,7 +1130,8 @@ function saveSimulationRecord(kind, fields, message) {
 function handleSemanticControl(button, event) {
   const screen = button.closest('.screen'); const screenId = screen?.id || '';
   const label = button.innerText.trim().replace(/\s+/g, ' '); const lower = label.toLocaleLowerCase();
-  const selectedClaim = state.claims.find((claim) => /OCS-26-01482/i.test(screen?.innerText || '') && claim.ocsId === 'OCS-26-01482');
+  const currentClaimId = window.currentClaimId || 'OCS-26-01482';
+  const selectedClaim = state.claims.find((claim) => claim.ocsId === currentClaimId) || claimFromFixture(currentClaimId);
   if (screenId === 'claim' && /edit details/i.test(label)) { openForm('new-claim', selectedClaim); return true; }
   if (screenId === 'claim' && /filter activity/i.test(label)) { openModuleFilterDialog('claim', 'actividad del claim'); return true; }
   if (screenId === 'claim' && /load earlier activity/i.test(label)) {
@@ -961,7 +1142,11 @@ function handleSemanticControl(button, event) {
   if (screenId === 'ai' && /^open claim$/i.test(label)) { window.go?.('claim'); return true; }
   if (screenId === 'ai' && /^show source email$/i.test(label)) { window.go?.('email'); return true; }
   if (screenId === 'customer' && /editar perfil/i.test(label)) { const client = clientByName('Maria Gonzalez'); openForm('new-client', client); return true; }
-  if (screenId === 'customer' && /más reciente primero/i.test(label)) { const rows = [...screen.querySelectorAll('tbody tr')]; rows.reverse().forEach((row) => row.parentElement.append(row)); toast('Historial ordenado · demo local'); return true; }
+  if (screenId === 'customer' && /más (reciente|antiguo) primero/i.test(label)) {
+    state.moduleSorts ||= {}; state.moduleSorts.customer = state.moduleSorts.customer === 'oldest' ? 'newest' : 'oldest';
+    const rows = [...screen.querySelectorAll('tbody tr')]; if (state.moduleSorts.customer === 'oldest') rows.reverse(); rows.forEach((row) => row.parentElement.append(row));
+    button.textContent = state.moduleSorts.customer === 'oldest' ? 'Más antiguo primero⌄' : 'Más reciente primero⌄'; save(); toast('Historial ordenado · preferencia local'); return true;
+  }
   if (screenId === 'portal') {
     if (/view as spanish/i.test(label) || /^(en|es)⌄$/i.test(label)) {
       state.portalLanguage = /spanish|^es/i.test(label) ? 'es' : 'en'; save();
@@ -992,7 +1177,11 @@ function handleSemanticControl(button, event) {
     saveSimulationRecord('communication', { title: screenId === 'phone' ? 'SMS de demostración' : 'Respuesta de demostración', channel: screenId === 'phone' ? 'SMS' : 'Email', contact: 'Contacto ficticio', content, relatedClaim: 'OCS-26-01482', status: 'Borrador local · requiere aprobación' }, 'Borrador creado para aprobación · no se envió');
     window.go?.('approvals'); return true;
   }
-  if (screenId === 'email' && /^change claim$/i.test(label)) { openForm('new-communication'); return true; }
+  if (screenId === 'email' && /^change claim$/i.test(label)) {
+    const body = document.getElementById('modalBody'); body.replaceChildren(); const wrapper = document.createElement('div'); wrapper.className = 'field'; const labelNode = document.createElement('label'); labelNode.htmlFor = 'email-match-claim'; labelNode.textContent = 'Asociar con claim demo';
+    const select = document.createElement('select'); select.id = 'email-match-claim'; select.dataset.field = 'relatedClaim'; select.required = true; state.claims.forEach((claim) => { const option = document.createElement('option'); option.value = claim.ocsId; option.textContent = `${claim.ocsId} · ${claim.customer}`; select.append(option); }); wrapper.append(labelNode, select); body.append(wrapper);
+    body.dataset.formAction = 'email-match'; body.dataset.emailId = button.dataset.emailId || state.activeEmail || 'Citizens Claims · Maria Gonzalez'; document.getElementById('modalTitle').textContent = 'Cambiar asociación del email'; document.getElementById('modalDesc').textContent = 'Asociación ficticia local · el correo no se mueve ni se envía.'; document.getElementById('modalback').classList.add('show'); return true;
+  }
   if (screenId === 'email' && /^attach file$/i.test(label)) { openLocalFileDialog('Adjuntar archivo · solo demo local'); return true; }
   if (screenId === 'phone' && /details|open thread|match contact/i.test(label)) {
     if (/match contact/i.test(label)) { openForm('new-client'); return true; }
@@ -1002,10 +1191,13 @@ function handleSemanticControl(button, event) {
   }
   if (screenId === 'templates' && /^cancel$/i.test(label)) { window.go?.('documents'); return true; }
   if (screenId === 'templates' && /save mapping/i.test(label)) {
-    saveSimulationRecord('template', { title: 'LOR · mapeo demo', type: 'Carta', visibility: 'Interno', format: 'PDF preview' }, 'Mapeo guardado localmente como template de demo'); return true;
+    const mappings = [...screen.querySelectorAll('.mappingrow[data-local-mapping]')].map((row) => ({ pdfField: row.querySelector('input')?.value.trim() || '', ocsField: row.querySelector('select')?.value || '' }));
+    const invalid = mappings.find((mapping) => !mapping.pdfField);
+    if (invalid) { screen.querySelector('.mappingrow[data-local-mapping] input')?.focus(); toast('Completa el nombre del campo PDF antes de guardar el mapeo'); return true; }
+    state.templateMappings = mappings; saveSimulationRecord('template', { title: 'LOR · mapeo demo', type: 'Carta', visibility: 'Interno', format: 'PDF preview' }, 'Mapeo guardado localmente como template de demo'); return true;
   }
   if (screenId === 'templates' && /add mapping/i.test(label)) {
-    const list = screen.querySelector('.mappingrow')?.parentElement; const row = document.createElement('div'); row.className = 'mappingrow';
+    const list = screen.querySelector('.mappingrow')?.parentElement; const row = document.createElement('div'); row.className = 'mappingrow'; row.dataset.localMapping = 'true';
     const name = document.createElement('input'); name.placeholder = 'Nombre del campo PDF'; name.setAttribute('aria-label', 'Nombre del campo PDF');
     const arrow = document.createElement('span'); arrow.textContent = '→';
     const select = document.createElement('select'); select.setAttribute('aria-label', 'Campo OCS asociado'); ['Policyholder · display name', 'Loss address', 'Loss date', 'Carrier claim number'].forEach((v) => { const o = document.createElement('option'); o.textContent = v; select.append(o); });
@@ -1018,18 +1210,36 @@ function handleSemanticControl(button, event) {
   }
   if ((screenId === 'workflows' || screenId === 'automations') && /publish/i.test(label)) {
     const name = screen.querySelector('.cardtitle')?.textContent.trim() || 'Regla de demo';
-    const existing = state.workflows.find((item) => item.title === name);
+    const existing = state.workflows.find((item) => item.id === state.activeWorkflowId) || state.workflows.find((item) => item.title === name) || state.workflows[0];
     if (existing) { existing.status = 'Activo · demo'; existing.updatedAt = now(); save(); render(); }
     else saveSimulationRecord('workflow', { title: name, trigger: 'Validación local de muestra', action: 'Ejecutar solo dentro de la demo', status: 'Activo · demo' }, 'Versión activada únicamente en la demostración');
     toast('Versión activada únicamente en la demostración'); return true;
   }
   if ((screenId === 'workflows' || screenId === 'automations') && /add condition|add action/i.test(label)) {
-    const row = document.createElement('div'); row.className = 'messagepreview mt'; row.textContent = `${/condition/i.test(label) ? 'Condición' : 'Acción'} nueva · configuración sintética pendiente`;
-    button.closest('.row')?.before(row); toast(`${row.textContent} · demo`); return true;
+    const entry = { id: makeId('RULEPART'), screen: screenId, label: `${/condition/i.test(label) ? 'Condición' : 'Acción'} nueva · configuración sintética pendiente`, at: now() };
+    state.workflowDraftItems ||= []; state.workflowDraftItems.push(entry); save(); render(); toast(`${entry.label} · demo`); return true;
   }
-  if ((screenId === 'workflows' || screenId === 'automations') && /version history|run history/i.test(label)) { window.go?.('support'); return true; }
+  if (screenId === 'automations' && /test against/i.test(label)) {
+    const body = document.getElementById('modalBody'); body.replaceChildren();
+    const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = 'Simulación en 50 claims sintéticos: 7 coincidencias, 0 mensajes enviados, 0 cambios externos. La prueba no lee expedientes ni ejecuta reglas reales.'; body.append(p);
+    document.getElementById('modalTitle').textContent = 'Resultado de prueba · dry run'; document.getElementById('modalDesc').textContent = 'Solo fixtures ficticios locales'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if ((screenId === 'workflows' || screenId === 'automations') && /version history|run history/i.test(label)) {
+    const entries = state.activity.filter((item) => /workflow|rule|automat/i.test(`${item.type} ${item.summary}`)).slice(0, 8);
+    const body = document.getElementById('modalBody'); body.replaceChildren();
+    const list = document.createElement('div'); list.className = 'record-list';
+    (entries.length ? entries : [{ summary: 'Sin ejecuciones previas; crea una regla local para empezar.', createdAt: now() }]).forEach((item) => {
+      const row = document.createElement('p'); row.className = 'smalltxt'; row.textContent = `${item.label || item.summary || 'Ejecución demo'} · ${item.at || item.createdAt ? new Date(item.at || item.createdAt).toLocaleString() : 'sin fecha'} · solo demo`; list.append(row);
+    });
+    body.append(list); document.getElementById('modalTitle').textContent = /version/i.test(label) ? 'Historial de versiones' : 'Historial de ejecuciones';
+    document.getElementById('modalDesc').textContent = 'Registro local sintético. No se ejecutó ninguna automatización real.'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'import' && /save mapping/i.test(label)) {
+    state.importMapping = { source: state.importSource || 'Fuente demo', savedAt: now(), fields: ['policyholder', 'claimId', 'lossDate'], status: 'Mapeo local · no importado' }; save();
+    const note = screen.querySelector('.module-note') || document.createElement('p'); note.className = 'module-note'; note.textContent = `Mapeo de ${state.importMapping.source} guardado localmente · no se conectó ni importó ninguna fuente.`; screen.querySelector('.screenhead')?.after(note); toast('Mapeo guardado solo en esta demo'); return true;
+  }
   if (screenId === 'reports' && /save report/i.test(label)) {
-    state.savedReports ||= []; state.savedReports.unshift({ id: makeId('RPT'), title: 'Reporte de desempeño · demo', filters: state.moduleFilters?.reports || '', createdAt: now() }); save(); toast('Reporte guardado en localStorage · Demo'); return true;
+    saveSimulationRecord('report', { title: 'Reporte de desempeño · demo', filters: state.moduleFilters?.reports || '', description: 'Captura de filtros local', status: 'Guardado · demo' }, 'Reporte guardado en localStorage · Demo'); return true;
   }
   if (screenId === 'reports' && /^export$/i.test(label)) {
     const rows = [['Métrica', 'Valor ficticio'], ['Claims abiertos', '126'], ['Días medianos por fase', '18.4'], ['Tareas a tiempo', '92%']];
@@ -1041,25 +1251,45 @@ function handleSemanticControl(button, event) {
     const body = document.getElementById('modalBody'); body.replaceChildren(); const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = 'Los KPIs del reporte se calculan sobre fixtures sintéticos de la demo; no representan datos reales ni una consulta a fuentes externas.'; body.append(p);
     document.getElementById('modalTitle').textContent = 'Definición de métricas'; document.getElementById('modalDesc').textContent = 'Origen y alcance · Demo'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
   }
+  if (screenId === 'signatures' && /export audit records/i.test(label)) {
+    const csv = [['Evento', 'Paquete', 'Estado'], ['Solicitud de firma', 'Acuerdo de demo', 'Simulada'], ['Recordatorio', 'Acuerdo de demo', 'No enviado']].map((row) => row.join(',')).join('\n');
+    const link = document.createElement('a'); const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); link.href = url; link.download = 'ocs-audit-firmas-demo.csv'; link.click(); URL.revokeObjectURL(url); toast('Auditoría sintética descargada · sin datos de firmas reales'); return true;
+  }
   if (screenId === 'signatures' && /send reminder/i.test(label)) {
-    const row = screen.querySelector('tbody tr'); if (row) { const status = row.querySelector('.pill'); if (status) status.textContent = 'Recordatorio simulado · no enviado'; }
+    state.signatureReminderAt = now(); save(); const row = screen.querySelector('tbody tr'); if (row) { const status = row.querySelector('.pill'); if (status) status.textContent = 'Recordatorio simulado · no enviado'; }
     toast('Recordatorio registrado en demo · no se envió'); return true;
   }
   if (screenId === 'signatures' && /open signed preview/i.test(label)) { window.go?.('viewer'); return true; }
+  if (screenId === 'integrations' && /integration activity log/i.test(label)) {
+    const body = document.getElementById('modalBody'); body.replaceChildren(); const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = 'Sin eventos de conexión. Gmail, Sheets, Vonage, Resend y DocuSign permanecen desconectados en este prototipo.'; body.append(p);
+    document.getElementById('modalTitle').textContent = 'Registro de actividad de integraciones'; document.getElementById('modalDesc').textContent = 'Estado local de la demostración'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
   if (screenId === 'integrations') {
     const title = button.closest('.card')?.querySelector('.cardtitle')?.textContent.trim() || label;
     const body = document.getElementById('modalBody'); body.replaceChildren();
     const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = `${title}: esta conexión permanece desconectada. La configuración se representa localmente y no se guardan credenciales.`; body.append(p);
     document.getElementById('modalTitle').textContent = `Configuración demo · ${title}`; document.getElementById('modalDesc').textContent = 'Sin API, OAuth ni cuentas reales.'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
   }
-  if (screenId === 'customdata' && /preview as user/i.test(label)) { toast('Vista previa del esquema para el rol seleccionado · sin permisos reales'); return true; }
+  if (screenId === 'customdata' && /preview as user/i.test(label)) {
+    const role = document.getElementById('roleSwitcher')?.value || 'Adjuster'; const body = document.getElementById('modalBody'); body.replaceChildren(); const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = `Vista del esquema para el rol ilustrativo “${role}”. Esto no aplica ni verifica permisos reales.`; body.append(p);
+    document.getElementById('modalTitle').textContent = 'Vista previa por rol'; document.getElementById('modalDesc').textContent = 'Esquema ficticio local'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'customdata' && /^formulas$/i.test(label)) {
+    const body = document.getElementById('modalBody'); body.replaceChildren(); const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = 'Las fórmulas visibles son ejemplos de cálculo sobre filas sintéticas. No evalúan datos externos ni fórmulas personalizadas.'; body.append(p);
+    document.getElementById('modalTitle').textContent = 'Fórmulas de ejemplo'; document.getElementById('modalDesc').textContent = 'Solo lectura · demo local'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'customdata' && /^fields⌄?$/i.test(label)) {
+    const columns = [...screen.querySelectorAll('thead th')].map((th) => th.innerText.trim()).filter(Boolean); const body = document.getElementById('modalBody'); body.replaceChildren();
+    columns.forEach((name, index) => { const labelNode = document.createElement('label'); labelNode.className = 'field'; labelNode.style.cssText = 'display:flex;align-items:center;gap:8px'; const input = document.createElement('input'); input.type = 'checkbox'; input.dataset.column = String(index); input.checked = !(state.hiddenCustomColumns || []).includes(index); labelNode.append(input, document.createTextNode(name)); body.append(labelNode); });
+    body.dataset.formAction = 'customdata-columns'; document.getElementById('modalTitle').textContent = 'Campos visibles'; document.getElementById('modalDesc').textContent = 'Selecciona las columnas que se muestran en esta vista local.'; document.getElementById('modalback').querySelector('[data-action="modal-confirm"]').textContent = 'Aplicar campos'; document.getElementById('modalback').classList.add('show'); return true;
+  }
   if (screenId === 'superadmin' && /create agency/i.test(label)) { openForm('new-agency', state.agency); return true; }
   if (screenId === 'access' && /request access/i.test(label)) {
     saveSimulationRecord('support', { title: 'Solicitud de acceso temporal', requester: 'Admin demo', owner: 'Sin asignar', status: 'Pendiente de aprobación' }, 'Solicitud registrada localmente · requiere aprobación de la agencia'); return true;
   }
   if (screenId === 'backups' && /create backup/i.test(label)) {
     state.backupPoints ||= []; state.backupPoints.unshift({ id: makeId('BKP'), label: `Copia local demo · ${new Date().toLocaleString()}`, createdAt: now(), status: 'Vista previa · sin archivos externos' }); save();
-    const panel = screen.querySelector('.screenhead'); const note = document.createElement('p'); note.className = 'module-note'; note.textContent = state.backupPoints[0].label + ' · no se generó ni subió ningún archivo.'; panel.after(note); toast('Punto de recuperación simulado localmente'); return true;
+    render(); toast('Punto de recuperación simulado localmente'); return true;
   }
   if (screenId === 'backups' && /preview restore/i.test(label)) {
     askConfirmation('Vista previa de restauración', 'Esta simulación no restaura, borra ni reemplaza datos. Los datos de muestra permanecen intactos.', () => toast('Vista previa revisada · sin cambios aplicados'), 'Entendido'); return true;
@@ -1071,19 +1301,47 @@ function handleSemanticControl(button, event) {
     if (/change visibility/i.test(label)) { toast('Visibilidad de prueba actualizada localmente · sin publicar al portal'); return true; }
     if (/rotate|zoom|^\+|^−/i.test(label)) { const page = screen.querySelector('.card[style*="background:#e9e9eb"] > div[style*="background:#fff"]'); if (page) page.style.transform = label.includes('Rotate') ? `rotate(${(Number(page.dataset.rotation || 0) + 90) % 360}deg)` : label === '+' ? 'scale(1.08)' : label === '−' ? 'scale(.92)' : page.style.transform; return true; }
   }
-  if ((screenId === 'support' || screenId === 'mitigation') && /open ticket|contact agency support/i.test(label)) { window.go?.('support'); return true; }
+  if (screenId === 'mitigation' && /contact agency support|open ticket/i.test(label)) { window.go?.('support'); return true; }
+  if (screenId === 'support' && /open ticket/i.test(label)) {
+    const row = button.closest('tr,.ticketrow,.card') || button.parentElement; const body = document.getElementById('modalBody'); body.replaceChildren(); const detail = document.createElement('p'); detail.className = 'smalltxt'; detail.textContent = `${row?.innerText || 'Ticket ficticio'} · detalle local de soporte; no se envió ninguna comunicación.`; body.append(detail);
+    document.getElementById('modalTitle').textContent = 'Detalle del ticket demo'; document.getElementById('modalDesc').textContent = 'Registro local'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'support' && /open agency audit log/i.test(label)) { window.go?.('admin'); return true; }
   if (screenId === 'admin' && /save configuration/i.test(label)) { logActivity('settings-saved', 'Configuración de agencia guardada en demo', 'admin'); save(); toast('Configuración guardada localmente · sin permisos reales'); return true; }
   if (screenId === 'tasks' && /^import task list$/i.test(label)) { openLocalFileDialog('Importar tareas · vista previa local'); return true; }
+  if (screenId === 'email' && label === '⌕') { openModuleFilterDialog('email', 'mensajes'); return true; }
+  if ((screenId === 'email' || screenId === 'claim') && label === '•••') {
+    const body = document.getElementById('modalBody'); body.replaceChildren(); const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = screenId === 'email' ? 'Opciones del buzón demo: marcar leído, archivar o abrir el detalle del hilo. Ningún correo real se modifica.' : 'Acciones del expediente demo: abrir documentos, tareas o vista previa.'; body.append(p);
+    document.getElementById('modalTitle').textContent = 'Más opciones'; document.getElementById('modalDesc').textContent = 'Acciones disponibles en esta demostración'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'templates' && /^zoom⌄?$/i.test(label)) { const card = [...screen.querySelectorAll('.card')].find((item) => item.innerText.includes('Document preview')); const preview = card?.querySelector('div[style*="min-height:380px"]'); if (preview) { const zoom = preview.dataset.demoZoom === '1.1' ? '1' : '1.1'; preview.dataset.demoZoom = zoom; preview.style.transform = `scale(${zoom})`; preview.style.transformOrigin = 'top center'; } return true; }
+  if (screenId === 'superadmin' && /plans & pricing/i.test(label)) {
+    const body = document.getElementById('modalBody'); body.replaceChildren(); const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = 'SaaS hospedado: precio ilustrativo desde $500/mes. Full Suite: $8,000–$10,000 indicativo. Valores sujetos a definición; no hay cobros ni suscripciones.'; body.append(p);
+    document.getElementById('modalTitle').textContent = 'Planes y precios · demo'; document.getElementById('modalDesc').textContent = 'Referencia comercial sintética'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'superadmin' && /view request status/i.test(label)) { window.go?.('access'); return true; }
+  if (screenId === 'offline' && /review changes/i.test(label)) {
+    const body = document.getElementById('modalBody'); body.replaceChildren(); const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = 'No hay cambios pendientes. La cola de sincronización es una maqueta y no conserva expedientes en caché.'; body.append(p);
+    document.getElementById('modalTitle').textContent = 'Revisión de cambios offline'; document.getElementById('modalDesc').textContent = 'Sin sincronización real'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'offline' && /save offline policy/i.test(label)) { state.offlinePolicy = { savedAt: now(), status: 'Preferencias guardadas localmente; caché y sync desactivados' }; save(); render(); toast(state.offlinePolicy.status); return true; }
+  if (screenId === 'viewer' && /^download$/i.test(label)) {
+    const content = 'Documento de muestra OCS\nDEMO · datos sintéticos · no es un documento legal ni un archivo de cliente real.\n'; const link = document.createElement('a'); const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' })); link.href = url; link.download = 'documento-ocs-sintetico-demo.txt'; link.click(); URL.revokeObjectURL(url); toast('Documento sintético descargado · no contiene información real'); return true;
+  }
+  if (screenId === 'viewer' && /change visibility/i.test(label)) {
+    state.viewerVisibility = state.viewerVisibility === 'Cliente · demo' ? 'Interno · demo' : 'Cliente · demo'; save(); render(); toast(`Visibilidad local: ${state.viewerVisibility}; no se publicó al portal`); return true;
+  }
+  if (screenId === 'viewer' && /rotate|zoom|^\+|^−|^＋$/i.test(label)) { const page = screen.querySelector('.card[style*="background:#e9e9eb"] > div[style*="background:#fff"]'); if (page) { if (/rotate/i.test(label)) { state.viewerRotation = (Number(state.viewerRotation || 0) + 90) % 360; page.style.transform = `scale(${Number(state.viewerZoom || 1)}) rotate(${state.viewerRotation}deg)`; } else { state.viewerZoom = Math.min(1.8, Math.max(.6, Number(state.viewerZoom || 1) + (label === '−' ? -.1 : .1))); page.style.transform = `scale(${state.viewerZoom}) rotate(${Number(state.viewerRotation || 0)}deg)`; } save(); } return true; }
+  if (screenId === 'backups' && /all types/i.test(label)) { openModuleFilterDialog('backups', 'copias de seguridad'); return true; }
   if (screenId === 'documents' && /^folder view/i.test(label)) { const table = screen.querySelector('.tablewrap'); table?.classList.toggle('folder-view-demo'); toast('Vista de carpetas alternada · demo local'); return true; }
   if (screenId === 'documents' && /^filter$/i.test(label)) { openModuleFilterDialog('documents', 'documentos'); return true; }
   if (screenId === 'documents' && /upload files/i.test(label)) { openLocalFileDialog('Cargar documentos · vista previa local'); return true; }
   if (screenId === 'tasks' && /lo tomo/i.test(label)) {
-    const card = button.closest('.taskcard'); if (card) { const owner = document.createElement('span'); owner.className = 'pill blue'; owner.textContent = 'Asignada a mí · demo'; card.querySelector('.taskfoot')?.replaceChildren(owner); }
+    const card = button.closest('.taskcard'); if (card) { const taskName = card.querySelector('b')?.textContent.trim() || card.innerText.trim().split('\n')[0]; state.taskAssignments ||= {}; state.taskAssignments[taskName] = 'Alex Parker · demo'; save(); const owner = document.createElement('span'); owner.className = 'pill blue'; owner.textContent = 'Asignada a mí · demo'; card.querySelector('.taskfoot')?.replaceChildren(owner); }
     toast('Tarea asignada al usuario demo'); return true;
   }
   if (screenId === 'calendar' && /^(‹|›)$/.test(label)) {
-    state.calendarOffset = (state.calendarOffset || 0) + (label === '›' ? 1 : -1); const base = new Date(2026, 9 + state.calendarOffset, 1);
-    const heading = screen.querySelector('.cardtitle'); if (heading) heading.textContent = base.toLocaleDateString('es', { month: 'long', year: 'numeric' }); save(); toast('Mes de calendario actualizado · datos de ejemplo'); return true;
+    state.calendarOffset = (state.calendarOffset || 0) + (label === '›' ? 1 : -1); renderCalendarMonth(); save(); toast('Mes de calendario actualizado · datos de ejemplo'); return true;
   }
   if (screenId === 'import' && /select source/i.test(label)) {
     state.importSource = button.closest('.card')?.querySelector('b')?.textContent.trim() || 'Fuente demo';
@@ -1092,7 +1350,7 @@ function handleSemanticControl(button, event) {
   }
   if (screenId === 'import' && /run preview/i.test(label)) {
     state.importRuns ||= []; state.importRuns.unshift({ id: makeId('PREVIEW'), source: state.importSource || 'Airtable · datos sintéticos', at: now(), status: 'Preview local · no importado' }); save();
-    const status = screen.querySelector('.screenhead .pill'); if (status) status.textContent = 'Preview local · no importado'; toast('Vista previa de migración simulada · no se leyó ni escribió ninguna fuente'); return true;
+    const status = screen.querySelector('.screenhead .pill'); if (status) status.textContent = 'Preview local · no importado'; render(); toast('Vista previa de migración simulada · no se leyó ni escribió ninguna fuente'); return true;
   }
   return false;
 }
@@ -1110,6 +1368,12 @@ function installFullNavigationHandlers() {
       event.preventDefault(); event.stopImmediatePropagation();
       const screenId = more.closest('.screen')?.id; const label = more.innerText.trim();
       if (screenId === 'claim' && label === '•••') { window.go?.('viewer'); return; }
+      if (screenId === 'tasks' && /full task audit/i.test(label)) {
+        const body = document.getElementById('modalBody'); body.replaceChildren();
+        const entries = state.activity.filter((item) => /task/i.test(item.type)).slice(0, 8);
+        const detail = document.createElement('p'); detail.className = 'smalltxt'; detail.textContent = entries.length ? entries.map((item) => `${item.label} · ${item.actor} · ${new Date(item.at).toLocaleString()}`).join('\n') : 'Historial sintético inicial: dos movimientos de tarea mostrados en el tablero; no hay más eventos locales.'; body.append(detail);
+        document.getElementById('modalTitle').textContent = 'Auditoría completa de tareas · demo'; document.getElementById('modalDesc').textContent = 'Registro local; no hay cronómetro ni actividad de usuarios reales.'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return;
+      }
       const route = screenId === 'claim' && label === 'Full task audit' ? 'tasks'
         : screenId === 'ai' && /audit|versions/i.test(label) ? 'support'
           : screenId === 'portal' && /^view$/i.test(label) ? 'viewer' : '';
@@ -1130,6 +1394,31 @@ function installFullNavigationHandlers() {
 
 function installListeners() {
   installFullNavigationHandlers();
+  document.querySelectorAll('#email .mailbox,#email .mailthread').forEach((item) => {
+    item.setAttribute('role', 'button'); item.setAttribute('tabindex', '0'); item.style.cursor = 'pointer';
+  });
+  document.addEventListener('click', (event) => {
+    const mailbox = event.target.closest('#email .mailbox');
+    if (mailbox) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const label = mailbox.textContent.replace(/[●○]/g, '').replace(/\s+\d+$/, '').trim();
+      if (/Vonage call log|SMS conversations/i.test(label)) { window.go?.('phone'); return; }
+      if (/@/.test(label)) state.selectedMailbox = label;
+      else state.emailFolder = label;
+      save(); renderEmailWorkspace(); return;
+    }
+    const thread = event.target.closest('#email .mailthread');
+    if (thread) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      state.activeEmail = thread.querySelector('b')?.textContent.trim() || thread.dataset.threadName || 'Email demo';
+      save(); renderEmailWorkspace(); return;
+    }
+  }, true);
+  document.addEventListener('keydown', (event) => {
+    if (!['Enter', ' '].includes(event.key)) return;
+    const item = event.target.closest?.('#email .mailbox,#email .mailthread');
+    if (item) { event.preventDefault(); item.click(); }
+  });
   document.querySelectorAll('#dashboard .card.metric').forEach((card) => {
     const label = card.querySelector('.metriclabel')?.textContent.toLowerCase() || '';
     const destination = label.includes('urgentes') ? 'claims' : label.includes('tareas') ? 'tasks' : label.includes('aprobar') ? 'approvals' : label.includes('pagos') ? 'accounting' : 'claims';
@@ -1439,11 +1728,18 @@ function installListeners() {
     if (claimRow && !event.target.closest('button')) {
       event.preventDefault();
       event.stopImmediatePropagation();
+      window.currentClaimId = claimRow.innerText.match(/OCS-[A-Z0-9-]+/)?.[0] || 'OCS-26-01482';
       if (window.go) window.go('claim', claimRow);
       return;
     }
+    const linkedClaimRow = event.target.closest('.screen.active tr[data-open="claim"]');
+    if (linkedClaimRow && !event.target.closest('button')) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      window.currentClaimId = linkedClaimRow.innerText.match(/OCS-[A-Z0-9-]+/)?.[0] || 'OCS-26-01482';
+      window.go?.('claim', linkedClaimRow); return;
+    }
     const button = event.target.closest('button');
-    if (!button || button.closest('.rail,.nav-popover,#modalback') || button.matches('#sidebarToggle,.mobile-nav-trigger,[data-screen],[data-action],[data-close],#resetDemo') || button.closest('.tab,.queueTabs,[role="tab"]')) return;
+    if (!button || button.matches('button[type="submit"]') || button.closest('.rail,.nav-popover,#modalback') || button.matches('#sidebarToggle,.mobile-nav-trigger,[data-screen],[data-action],[data-close],#resetDemo') || button.closest('.tab,.queueTabs,[role="tab"]')) return;
     const label = button.innerText.trim();
     const screenId = button.closest('.screen')?.id || document.querySelector('.screen.active')?.id;
     if (/^save as draft$/i.test(label) && screenId === 'approvals') {
@@ -1548,6 +1844,21 @@ function installListeners() {
       state.hiddenClaimColumns = [...body.querySelectorAll('input[data-column]:not(:checked)')].map((input) => Number(input.dataset.column));
       applyClaimColumns(); save(); document.getElementById('modalback').classList.remove('show'); delete body.dataset.formAction;
       toast('Columnas actualizadas en esta vista local · Demo'); return;
+    }
+    if (action === 'customdata-columns') {
+      state.hiddenCustomColumns = [...body.querySelectorAll('input[data-column]:not(:checked)')].map((input) => Number(input.dataset.column));
+      applyCustomDataColumns(); save(); document.getElementById('modalback').classList.remove('show'); delete body.dataset.formAction;
+      toast('Campos visibles actualizados en la tabla demo'); return;
+    }
+    if (action === 'email-match') {
+      const select = body.querySelector('[data-field="relatedClaim"]');
+      if (!select?.checkValidity()) { select?.reportValidity(); select?.focus(); return; }
+      state.emailMatches ||= {}; state.emailMatches[body.dataset.emailId || 'Citizens Claims · Maria Gonzalez'] = select.value;
+      logActivity('email-claim-matched', `Email demo asociado a ${select.value}`, body.dataset.emailId); save();
+      const thread = [...document.querySelectorAll('#email .mailthread')].find((item) => item.querySelector('b')?.textContent.trim() === body.dataset.emailId);
+      let badge = thread?.querySelector('.demo-match-status'); if (thread && !badge) { badge = document.createElement('small'); badge.className = 'demo-match-status'; thread.append(badge); }
+      if (badge) badge.textContent = `Asociado a ${select.value} · demo`;
+      document.getElementById('modalback').classList.remove('show'); delete body.dataset.formAction; delete body.dataset.emailId; toast('Email asociado localmente · no se movió ni envió'); return;
     }
     if (action === 'local-file') {
       const file = body.querySelector('input[type="file"]')?.files?.[0];
