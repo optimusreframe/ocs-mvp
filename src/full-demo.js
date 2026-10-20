@@ -26,6 +26,14 @@ const emptyState = () => ({
   importRuns: [],
   backupPoints: [],
   controlActions: [],
+  taskMovements: [],
+  claimMovements: [],
+  documentMappings: [],
+  documentPreview: null,
+  selectedDocumentTemplate: '',
+  selectedDocumentClaim: '',
+  demoScenario: '',
+  roleDemo: 'Adjuster',
 });
 
 function readState() {
@@ -182,6 +190,7 @@ function makeRecordPanel(screenId, title, records, kind, describe) {
     if (formForKind[kind]) actions.append(safeButton('Editar', 'btn sm', 'edit', record.id));
     if (kind === 'claim') actions.append(safeButton(record.archived ? 'Restaurar' : 'Archivar', 'btn sm', 'archive', record.id));
     if (kind === 'task' && record.status !== 'Completada') {
+      actions.append(safeButton('Mover estado', 'btn sm', 'move', record.id));
       actions.append(safeButton('Completar', 'btn sm', 'complete', record.id));
     }
     if (kind === 'communication' && record.status === 'Borrador local') actions.append(safeButton('Aprobar · no enviar', 'btn sm', 'approve', record.id));
@@ -317,6 +326,9 @@ function render() {
   renderTemplateMappings();
   renderEmailWorkspace();
   renderDemoJourney();
+  renderDemoScenarios();
+  renderActivityAudit();
+  renderDocumentStudio();
   renderClaimRelationships();
   renderCustomerRelationships();
   renderPortalDocuments();
@@ -340,6 +352,10 @@ function render() {
     if (thread) { let badge = thread.querySelector('.demo-match-status'); if (!badge) { badge = document.createElement('small'); badge.className = 'demo-match-status'; thread.append(badge); } badge.textContent = `Asociado a ${claimId} · demo`; }
   });
   if (state.agency) applyAgency(state.agency);
+  const roleSelector = document.getElementById('roleSwitcher');
+  if (roleSelector) { state.roleDemo ||= roleSelector.value || 'Adjuster'; roleSelector.value = state.roleDemo; }
+  const roleBanner = document.querySelector('.demo-mode-banner');
+  if (roleBanner && state.roleDemo && state.roleDemo !== 'Adjuster') roleBanner.textContent = `DEMO · ${state.roleDemo} · local · nada se envía`;
   const languageButton = [...document.querySelectorAll('.topright button.tinybtn')].find((button) => /^(ES|EN)⌄?$/.test(button.textContent.trim()));
   if (languageButton) {
     state.uiLanguage ||= (navigator.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
@@ -400,11 +416,226 @@ function renderDemoJourney() {
   card.append(footer);
 }
 
+function renderDemoScenarios() {
+  const screen = document.getElementById('dashboard');
+  const head = screen?.querySelector('.screenhead');
+  if (!screen || !head) return;
+  let panel = screen.querySelector('.demo-scenarios');
+  if (!panel) { panel = document.createElement('section'); panel.className = 'card demo-scenarios'; panel.setAttribute('aria-labelledby', 'demo-scenarios-title'); head.after(panel); }
+  panel.replaceChildren();
+  const top = document.createElement('div'); top.className = 'cardhead';
+  const copy = document.createElement('div'); const title = document.createElement('h2'); title.id = 'demo-scenarios-title'; title.className = 'cardtitle'; title.textContent = 'Escenarios de demostración';
+  const desc = document.createElement('p'); desc.className = 'cardsub'; desc.textContent = 'Agrega un recorrido sintético completo a este workspace local. No reemplaza tus cambios.'; copy.append(title, desc);
+  const badge = document.createElement('span'); badge.className = 'pill blue'; badge.textContent = 'Datos ficticios'; top.append(copy, badge); panel.append(top);
+  const scenarios = [
+    ['claim', 'Daño por agua · nuevo claim', 'Cliente, claim, tarea, documento y borrador ligado.'],
+    ['portal', 'Portal · solicitud de cliente', 'Claim, cita local, solicitud y documento visible.'],
+    ['accounting', 'Conciliación · Sheets read-only', 'Claim sintético y anotación OCS asociada a una fila de muestra.'],
+  ];
+  const list = document.createElement('div'); list.className = 'demo-scenario-list';
+  scenarios.forEach(([id, label, summary]) => {
+    const card = document.createElement('article'); card.className = 'demo-scenario';
+    const name = document.createElement('strong'); name.textContent = label;
+    const detail = document.createElement('small'); detail.textContent = summary;
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'btn sm'; button.dataset.demoScenario = id; button.textContent = 'Agregar escenario';
+    card.append(name, detail, button); list.append(card);
+  });
+  panel.append(list);
+}
+
+function renderActivityAudit() {
+  ['admin', 'dashboard'].forEach((screenId) => {
+    const screen = document.getElementById(screenId); const head = screen?.querySelector('.screenhead');
+    if (!screen || !head) return;
+    let panel = screen.querySelector('.demo-activity-audit');
+    if (!panel) { panel = document.createElement('section'); panel.className = 'card demo-activity-audit'; head.after(panel); }
+    panel.replaceChildren();
+    const title = document.createElement('div'); title.className = 'cardhead';
+    const heading = document.createElement('strong'); heading.textContent = screenId === 'admin' ? 'Auditoría de cambios · demo local' : 'Actividad reciente · demo local';
+    const badge = document.createElement('span'); badge.className = 'pill blue'; badge.textContent = `${state.activity.length} eventos`; title.append(heading, badge); panel.append(title);
+    const entries = state.activity.slice(0, screenId === 'admin' ? 8 : 4);
+    if (!entries.length) { const empty = document.createElement('p'); empty.className = 'smalltxt'; empty.textContent = 'Las acciones de esta sesión aparecerán aquí.'; panel.append(empty); return; }
+    entries.forEach((entry) => {
+      const row = document.createElement('div'); row.className = 'demo-audit-row';
+      const label = document.createElement('span'); label.textContent = entry.label;
+      const meta = document.createElement('small'); meta.textContent = `${entry.actor || 'Admin demo'} · ${new Date(entry.at).toLocaleString()}`;
+      row.append(label, meta); panel.append(row);
+    });
+  });
+  const taskScreen = document.getElementById('tasks');
+  if (taskScreen) {
+    let history = taskScreen.querySelector('.task-movement-history');
+    if (!history) { history = document.createElement('section'); history.className = 'card task-movement-history'; taskScreen.querySelector('.screenhead')?.after(history); }
+    history.replaceChildren();
+    const title = document.createElement('div'); title.className = 'cardhead'; const heading = document.createElement('strong'); heading.textContent = 'Historial de movimientos · Demo';
+    const badge = document.createElement('span'); badge.className = 'pill blue'; badge.textContent = `${(state.taskMovements || []).length} movimientos`; title.append(heading, badge); history.append(title);
+    const movements = (state.taskMovements || []).slice(0, 6);
+    if (!movements.length) { const empty = document.createElement('p'); empty.className = 'smalltxt'; empty.textContent = 'Al mover una tarea de columna se registrará aquí el cambio, el rol demo y la hora.'; history.append(empty); }
+    movements.forEach((movement) => { const row = document.createElement('div'); row.className = 'demo-audit-row'; const label = document.createElement('span'); label.textContent = `${movement.title}: ${movement.from} → ${movement.to}`; const meta = document.createElement('small'); meta.textContent = `${movement.actor} · ${new Date(movement.at).toLocaleString()}`; row.append(label, meta); history.append(row); });
+  }
+}
+
+function renderDocumentStudio() {
+  const screen = document.getElementById('templates');
+  const head = screen?.querySelector('.screenhead');
+  if (!screen || !head) return;
+  let panel = screen.querySelector('.demo-document-studio');
+  if (!panel) { panel = document.createElement('section'); panel.className = 'card demo-document-studio'; panel.setAttribute('aria-labelledby', 'document-studio-title'); head.after(panel); }
+  if (!state.documentMappings?.length) {
+    state.documentMappings = [
+      { id: 'map-policyholder', pdfField: 'insured_name', ocsField: 'Policyholder · nombre visible' },
+      { id: 'map-loss-address', pdfField: 'property_address', ocsField: 'Claim · dirección de pérdida' },
+      { id: 'map-loss-date', pdfField: 'loss_date', ocsField: 'Claim · fecha de pérdida' },
+      { id: 'map-carrier', pdfField: 'carrier_name', ocsField: 'Claim · aseguradora' },
+    ];
+  }
+  panel.replaceChildren();
+  const top = document.createElement('div'); top.className = 'cardhead';
+  const copy = document.createElement('div'); const title = document.createElement('h2'); title.id = 'document-studio-title'; title.className = 'cardtitle'; title.textContent = 'Document Studio · mapeo y preview';
+  const desc = document.createElement('p'); desc.className = 'cardsub'; desc.textContent = 'Mapea campos ficticios, previsualiza valores y genera metadatos locales. Sin PDF legal ni envío.'; copy.append(title, desc);
+  const add = document.createElement('button'); add.type = 'button'; add.className = 'btn sm'; add.dataset.studioAction = 'add-mapping'; add.textContent = '＋ Agregar campo'; top.append(copy, add); panel.append(top);
+  const controls = document.createElement('div'); controls.className = 'document-studio-controls';
+  const templateLabel = document.createElement('label'); templateLabel.className = 'field'; templateLabel.textContent = 'Template demo';
+  const template = document.createElement('select'); template.dataset.studioField = 'template';
+  const templateNames = [...new Set(['Letter of Representation · demo', ...state.templates.map((item) => item.title).filter(Boolean)])];
+  templateNames.forEach((name) => { const option = document.createElement('option'); option.value = name; option.textContent = name; template.append(option); });
+  template.value = state.selectedDocumentTemplate || templateNames[0] || '';
+  templateLabel.append(template);
+  const claimLabel = document.createElement('label'); claimLabel.className = 'field'; claimLabel.textContent = 'Claim de preview';
+  const claimSelect = document.createElement('select'); claimSelect.dataset.studioField = 'claim';
+  state.claims.forEach((claim) => { const option = document.createElement('option'); option.value = claim.ocsId; option.textContent = `${claim.ocsId} · ${claim.customer}`; claimSelect.append(option); });
+  claimSelect.value = state.selectedDocumentClaim || state.activeDemoClaimId || state.demoJourneyClaimId || state.claims[0]?.ocsId || '';
+  if (!state.claims.length) { const option = document.createElement('option'); option.textContent = 'Crea un claim demo primero'; option.value = ''; claimSelect.append(option); }
+  claimLabel.append(claimSelect); controls.append(templateLabel, claimLabel);
+  const actions = document.createElement('div'); actions.className = 'actions';
+  [['preview', 'Actualizar preview'], ['generate', 'Generar documento demo']].forEach(([action, label]) => { const button = document.createElement('button'); button.type = 'button'; button.className = action === 'generate' ? 'btn primary' : 'btn'; button.dataset.studioAction = action; button.textContent = label; actions.append(button); });
+  controls.append(actions); panel.append(controls);
+  const mapWrap = document.createElement('div'); mapWrap.className = 'document-studio-mappings';
+  state.documentMappings.forEach((mapping) => {
+    const row = document.createElement('div'); row.className = 'document-studio-mapping'; row.dataset.mappingId = mapping.id;
+    const pdf = document.createElement('input'); pdf.type = 'text'; pdf.value = mapping.pdfField; pdf.placeholder = 'Campo PDF'; pdf.setAttribute('aria-label', 'Nombre del campo del template'); pdf.dataset.mappingField = 'pdfField';
+    const arrow = document.createElement('span'); arrow.textContent = '→';
+    const source = document.createElement('select'); source.setAttribute('aria-label', 'Campo de origen OCS'); source.dataset.mappingField = 'ocsField';
+    ['Policyholder · nombre visible', 'Claim · dirección de pérdida', 'Claim · fecha de pérdida', 'Claim · aseguradora', 'Claim · identificador OCS', 'Agencia · nombre comercial'].forEach((value) => { const option = document.createElement('option'); option.value = value; option.textContent = value; source.append(option); }); source.value = mapping.ocsField;
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn sm danger'; remove.dataset.studioAction = 'remove-mapping'; remove.textContent = 'Quitar';
+    row.append(pdf, arrow, source, remove); mapWrap.append(row);
+  });
+  panel.append(mapWrap);
+  const preview = document.createElement('div'); preview.className = 'document-studio-preview'; preview.setAttribute('aria-live', 'polite');
+  if (state.documentPreview) {
+    const heading = document.createElement('strong'); heading.textContent = `${state.documentPreview.template} · ${state.documentPreview.claimId}`; preview.append(heading);
+    state.documentPreview.fields.forEach((field) => { const line = document.createElement('div'); const label = document.createElement('b'); label.textContent = `[${field.pdfField}]`; line.append(label, document.createTextNode(` ${field.value}`)); preview.append(line); });
+    const note = document.createElement('small'); note.textContent = 'Vista previa sintética · no es un documento legal ni un archivo final.'; preview.append(note);
+  } else preview.textContent = 'La vista previa rellenará los campos con datos sintéticos del claim seleccionado.';
+  panel.append(preview);
+}
+
+function updateDocumentPreview({ generate = false } = {}) {
+  const screen = document.getElementById('templates'); const selectedId = screen?.querySelector('[data-studio-field="claim"]')?.value;
+  const claim = state.claims.find((item) => item.ocsId === selectedId) || state.claims[0];
+  if (!claim) { toast('Crea o selecciona un claim demo para generar el preview.'); return; }
+  const valueFor = (source) => ({
+    'Policyholder · nombre visible': claim.customer,
+    'Claim · dirección de pérdida': claim.address || 'Dirección ficticia de demo',
+    'Claim · fecha de pérdida': claim.date || 'Fecha de demo',
+    'Claim · aseguradora': claim.carrier || 'Aseguradora sintética',
+    'Claim · identificador OCS': claim.ocsId,
+    'Agencia · nombre comercial': state.agency?.publicName || 'Agencia Demo',
+  }[source] || '—');
+  const fields = state.documentMappings.map((item) => ({ ...item, value: valueFor(item.ocsField) }));
+  const preview = { template: screen.querySelector('[data-studio-field="template"]')?.value || 'Template demo', claimId: claim.ocsId, customer: claim.customer, fields, updatedAt: now() };
+  state.documentPreview = preview;
+  logActivity('document-preview', `Preview local de ${preview.template} para ${claim.ocsId}`, claim.id); save(); renderDocumentStudio();
+  if (generate) {
+    const record = { id: makeId('DOC'), title: `${preview.template} · ${claim.customer}`, fileName: 'preview-sintetico-ocs.txt', relatedClaim: claim.ocsId, visibility: 'Requiere aprobación', template: preview.template, fields, status: 'Generado · demo', createdAt: now(), updatedAt: now() };
+    state.documents.unshift(record); logActivity('document-generated', `Documento de preview generado para ${claim.ocsId}`, record.id); save(); render(); toast('Documento creado en la demo local · no es PDF legal ni se compartió'); return;
+  }
+  toast('Preview generado con campos ficticios · no se creó un archivo externo');
+}
+
+function openTaskMoveDialog(task) {
+  const backdrop = document.getElementById('modalback'); const body = document.getElementById('modalBody');
+  if (!backdrop || !body) return;
+  body.replaceChildren();
+  const label = document.createElement('label'); label.className = 'field'; label.textContent = `Nuevo estado · ${task.title}`;
+  const select = document.createElement('select'); select.dataset.field = 'status'; select.required = true;
+  ['Pendiente', 'En curso', 'En espera', 'Completada'].forEach((value) => { const option = document.createElement('option'); option.value = value; option.textContent = value; option.selected = value === task.status; select.append(option); });
+  label.append(select); body.append(label); body.dataset.formAction = 'task-move'; body.dataset.editId = task.id;
+  document.getElementById('modalTitle').textContent = 'Mover tarea · demo local';
+  document.getElementById('modalDesc').textContent = 'El movimiento se agrega al historial local con el rol y la hora actuales.';
+  backdrop.querySelector('[data-action="modal-confirm"]').textContent = 'Guardar movimiento'; backdrop.classList.add('show'); select.focus();
+}
+
+function applyDemoRole(role) {
+  state.roleDemo = role;
+  if (role === 'Customer') {
+    const visibleDocument = state.documents.find((item) => /publicad|cliente/i.test(item.visibility || '') && item.relatedClaim);
+    if (visibleDocument) {
+      state.activeDemoClaimId = visibleDocument.relatedClaim;
+      state.selectedDocumentClaim = visibleDocument.relatedClaim;
+      window.currentClaimId = visibleDocument.relatedClaim;
+    }
+  }
+  logActivity('role-perspective', `Perspectiva de demo cambiada a ${role}`, role); save();
+  const destinations = { Customer: 'portal', Mitigation: 'mitigation', Accounting: 'accounting', Admin: 'admin', Superadmin: 'superadmin', Adjuster: 'dashboard', Assistant: 'dashboard' };
+  const route = destinations[role] || 'dashboard';
+  document.querySelector('.demo-role-label')?.setAttribute('title', `Perspectiva ilustrativa ${role}; no aplica controles de acceso reales.`);
+  const banner = document.querySelector('.demo-mode-banner'); if (banner) banner.textContent = `DEMO · ${role} · local · nada se envía`;
+  window.go?.(route); render(); toast(`Perspectiva ${role} · solo visualización demo, sin permisos reales`);
+}
+
+function ensureAccessibleControls() {
+  document.querySelectorAll('.screen input,.screen select,.screen textarea').forEach((field, index) => {
+    if (!field.id) field.id = `ocs-demo-field-${field.closest('.screen')?.id || 'global'}-${index + 1}`;
+    if (!field.name) field.name = field.dataset.field || field.id;
+    if (field.labels?.length || field.getAttribute('aria-label') || field.getAttribute('aria-labelledby')) return;
+    const nearby = field.closest('.field')?.querySelector('label') || field.parentElement?.querySelector(':scope > label');
+    if (nearby) {
+      nearby.htmlFor ||= field.id;
+      return;
+    }
+    const humanLabel = field.getAttribute('placeholder') || field.getAttribute('title') || `${field.type === 'checkbox' ? 'Opción' : 'Campo'} de ${field.closest('.screen')?.querySelector('h1')?.textContent || 'demo'}`;
+    field.setAttribute('aria-label', humanLabel);
+  });
+}
+
+function addDemoScenario(id) {
+  const stamp = `${Date.now().toString().slice(-5)}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+  const scenarios = {
+    claim: { customer: `Elena Marín · demo ${stamp}`, lossType: 'Agua', address: 'Propiedad de ejemplo · Tampa', state: 'Florida', carrier: 'Carrier sintético', stage: 'Intake · Demo', nextAction: 'Revisar evidencia demo' },
+    portal: { customer: `Noah Bennett · demo ${stamp}`, lossType: 'Viento / huracán', address: 'Propiedad de ejemplo · Savannah', state: 'Georgia', carrier: 'Aseguradora ficticia', stage: 'Inspección · Demo', nextAction: 'Confirmar cita demo' },
+    accounting: { customer: `Maya Torres · demo ${stamp}`, lossType: 'Incendio', address: 'Propiedad de ejemplo · Orlando', state: 'Florida', carrier: 'Carrier de prueba', stage: 'Conciliación · Demo', nextAction: 'Asociar fila de Sheets' },
+  };
+  const seed = scenarios[id]; if (!seed) return;
+  const client = ensureClient(seed.customer, `${seed.customer.toLowerCase().replace(/[^a-z0-9]+/g, '.')}@example.invalid`);
+  const claim = { id: makeId('CLM'), ocsId: `OCS-DEMO-${stamp}`, ...seed, email: client.email, clientId: client.id, status: 'Abierto · Demo', createdAt: now(), updatedAt: now() };
+  state.claims.unshift(claim);
+  const records = {
+    claim: [
+      ['tasks', { title: 'Revisar evidencia · demo', relatedClaim: claim.ocsId, status: 'Pendiente', priority: 'Alta', assignee: 'Alex Parker' }],
+      ['documents', { title: 'Fotos iniciales · demo', fileName: 'fotos-sinteticas-demo.txt', relatedClaim: claim.ocsId, visibility: 'Requiere aprobación', status: 'Disponible · demo' }],
+      ['communications', { title: 'Seguimiento al cliente · demo', channel: 'Email', contact: seed.customer, content: 'Borrador de ejemplo pendiente de revisión. No se enviará.', relatedClaim: claim.ocsId, status: 'Borrador local' }],
+    ],
+    portal: [
+      ['events', { title: 'Inspección de muestra', date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), relatedClaim: claim.ocsId, assignee: 'Alex Parker' }],
+      ['portalEvents', { title: 'Confirmar disponibilidad de inspección', type: 'Cita', relatedClaim: claim.ocsId, status: 'Pendiente de revisión' }],
+      ['documents', { title: 'Guía del cliente · demo', fileName: 'guia-demo.txt', relatedClaim: claim.ocsId, visibility: 'Publicado al portal', status: 'Visible · local' }],
+    ],
+    accounting: [
+      ['reconciliations', { reference: `TX-DEMO-${stamp}`, note: 'Asociación local de referencia; la fuente contable sigue en solo lectura.', relatedClaim: claim.ocsId, status: 'Asociado · demo' }],
+    ],
+  }[id];
+  records.forEach(([store, record]) => state[store].unshift({ id: makeId(store.toUpperCase()), ...record, createdAt: now(), updatedAt: now() }));
+  state.demoScenario = id; state.activeDemoClaimId = claim.ocsId;
+  logActivity('scenario-loaded', `Escenario demo agregado: ${id} · ${claim.ocsId}`, claim.id);
+  save(); render(); toast(`Escenario agregado localmente · ${claim.ocsId} · nada salió del navegador`);
+}
+
 function renderClaimRelationships() {
   const screen = document.getElementById('claim'); if (!screen) return;
   let panel = screen.querySelector('.claim-related-demo');
   if (!panel) { panel = document.createElement('section'); panel.className = 'card claim-related-demo'; panel.setAttribute('aria-live', 'polite'); screen.querySelector('.screenhead')?.after(panel); }
-  const claimId = window.currentClaimId || state.demoJourneyClaimId || 'OCS-26-01482';
+  const claimId = state.activeDemoClaimId || window.currentClaimId || state.demoJourneyClaimId || 'OCS-26-01482';
   const records = [
     ['Tareas', 'tasks', state.tasks.filter((item) => item.relatedClaim === claimId)],
     ['Documentos', 'documents', state.documents.filter((item) => item.relatedClaim === claimId)],
@@ -422,6 +653,12 @@ function renderClaimRelationships() {
     const detail = document.createElement('small'); detail.textContent = items.length ? items.slice(0, 2).map((item) => item.title || item.fileName || item.type || 'Registro demo').join(' · ') : 'Sin registros locales relacionados';
     box.append(button, detail); grid.append(box);
   });
+  const movements = (state.claimMovements || []).filter((item) => item.claimId === claimId).slice(0, 3);
+  if (movements.length) {
+    const box = document.createElement('div'); box.className = 'claim-related-item';
+    const heading = document.createElement('strong'); heading.textContent = `Cambios de fase · ${movements.length}`; box.append(heading);
+    const detail = document.createElement('small'); detail.textContent = movements.map((item) => `${item.from} → ${item.to} · ${item.actor}`).join(' | '); box.append(detail); grid.append(box);
+  }
   panel.append(grid);
 }
 
@@ -429,7 +666,7 @@ function renderPortalDocuments() {
   const screen = document.getElementById('portal'); if (!screen) return;
   let panel = screen.querySelector('.portal-demo-documents');
   if (!panel) { panel = document.createElement('section'); panel.className = 'card portal-demo-documents'; panel.setAttribute('aria-live', 'polite'); screen.querySelector('.screenhead')?.after(panel); }
-  const claimId = state.demoJourneyClaimId || window.currentClaimId || 'OCS-26-01482';
+  const claimId = state.activeDemoClaimId || window.currentClaimId || state.demoJourneyClaimId || 'OCS-26-01482';
   const docs = state.documents.filter((item) => item.relatedClaim === claimId && /publicad|cliente/i.test(item.visibility || ''));
   panel.replaceChildren();
   const heading = document.createElement('div'); heading.className = 'cardhead';
@@ -443,11 +680,12 @@ function renderCustomerRelationships() {
   const screen = document.getElementById('customer'); if (!screen) return;
   let panel = screen.querySelector('.customer-related-demo');
   if (!panel) { panel = document.createElement('section'); panel.className = 'card customer-related-demo'; panel.setAttribute('aria-live', 'polite'); screen.querySelector('.screenhead')?.after(panel); }
-  const journeyClaim = state.claims.find((item) => item.ocsId === state.demoJourneyClaimId);
+  const journeyClaim = state.claims.find((item) => item.ocsId === (window.currentClaimId || state.activeDemoClaimId || state.demoJourneyClaimId));
   const selectedClient = journeyClaim?.clientId ? state.clients.find((item) => item.id === journeyClaim.clientId) : null;
   const client = selectedClient || state.clients.find((item) => /Maria Gonzalez/i.test(item.name)) || null;
   const name = client?.name || journeyClaim?.customer || 'Maria Gonzalez · fixture demo';
-  const claims = state.claims.filter((item) => (client && item.clientId === client.id) || item.customer?.toLocaleLowerCase().startsWith(name.toLocaleLowerCase()));
+  const claims = state.claims.filter((item) => (client && item.clientId === client.id) || item.customer?.toLocaleLowerCase().startsWith(name.toLocaleLowerCase()))
+    .sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || '')));
   panel.replaceChildren();
   const head = document.createElement('div'); head.className = 'cardhead';
   const title = document.createElement('strong'); title.textContent = `Perfil 360 · ${name}`;
@@ -652,7 +890,13 @@ function renderCalendarMonth() {
   const screen = document.getElementById('calendar'); const table = screen?.querySelector('.tablewrap table'); const tbody = table?.querySelector('tbody');
   if (!tbody) return;
   const offset = Number(state.calendarOffset || 0); const firstDay = new Date(2026, 9 + offset, 1); const gridStart = new Date(2026, 9 + offset, 1 - firstDay.getDay());
-  const events = offset === 0 ? { 15: 'LOR due', 19: 'Inspection 2:30 · Carrier call 4:00', 20: 'Chen inspection', 22: 'Recorded statement' } : {};
+  const events = offset === 0 ? { 15: ['LOR due'], 19: ['Inspection 2:30 · Carrier call 4:00'], 20: ['Chen inspection'], 22: ['Recorded statement'] } : {};
+  state.events.forEach((item) => {
+    if (!item.date) return;
+    const eventDate = new Date(item.date);
+    if (!Number.isFinite(eventDate.getTime()) || eventDate.getMonth() !== firstDay.getMonth() || eventDate.getFullYear() !== firstDay.getFullYear()) return;
+    events[eventDate.getDate()] ||= []; events[eventDate.getDate()].push(`${item.title} · demo`);
+  });
   tbody.replaceChildren();
   for (let week = 0; week < 6; week++) {
     const row = document.createElement('tr');
@@ -661,7 +905,7 @@ function renderCalendarMonth() {
       const cell = document.createElement('td'); cell.dataset.date = date.toISOString().slice(0, 10); cell.textContent = String(date.getDate());
       if (date.getMonth() !== firstDay.getMonth()) cell.style.color = '#a1a1a6';
       if (offset === 0 && date.getDate() === 19 && date.getMonth() === firstDay.getMonth()) cell.style.cssText += ';background:#f7f5ff;border-radius:7px';
-      if (events[date.getDate()] && date.getMonth() === firstDay.getMonth()) { const badge = document.createElement('span'); badge.className = 'pill violet'; badge.textContent = events[date.getDate()]; cell.append(document.createElement('br'), badge); }
+      if (events[date.getDate()] && date.getMonth() === firstDay.getMonth()) { events[date.getDate()].slice(0, 2).forEach((eventLabel) => { const badge = document.createElement('span'); badge.className = 'pill violet'; badge.textContent = eventLabel; cell.append(document.createElement('br'), badge); }); }
       row.append(cell);
     }
     tbody.append(row);
@@ -838,6 +1082,8 @@ const formMarkup = {
       ['address', 'Propiedad · etiqueta ficticia', 'text', false, 'Dirección de demostración'],
       ['carrier', 'Aseguradora (demo)', 'text', false, 'Aseguradora de prueba'],
       ['assignee', 'Adjuster asignado', 'select', false, ['Sin asignar', 'Jordan Rivera', 'Morgan Lee', 'Alex Parker']],
+      ['stage', 'Fase interna', 'select', false, ['Intake · Demo', 'Inspección · Demo', 'Estimate · Demo', 'Carrier review · Demo', 'Resolution · Demo', 'Closed · Demo']],
+      ['clientStage', 'Estado visible para cliente', 'select', false, ['Review · Demo', 'Inspección programada · Demo', 'Esperando cliente · Demo', 'Resolución · Demo']],
       ['nextAction', 'Próxima acción', 'text', false, 'Revisar documentos recibidos'],
     ],
   },
@@ -1002,6 +1248,8 @@ function openForm(action, record) {
     if (required) input.required = true;
     const value = record?.[key];
     if (value !== undefined && value !== null && input.type !== 'file') input.value = value;
+    if (!value && input.type === 'date') input.value = new Date().toISOString().slice(0, 10);
+    if (!value && input.type === 'datetime-local') input.value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     wrap.append(label, input);
     body.append(wrap);
   });
@@ -1038,9 +1286,9 @@ function upsert(action, existing) {
     const client = ensureClient(values.customer, values.email);
     values.clientId = client?.id;
     values.ocsId = existing?.ocsId || `OCS-DEMO-${String(Date.now()).slice(-5)}`;
-    values.stage = existing?.stage || 'Intake · Demo';
-    values.clientStage = existing?.clientStage || 'Review · Demo';
-    values.status = existing?.status || 'Abierto';
+    values.stage ||= existing?.stage || 'Intake · Demo';
+    values.clientStage ||= existing?.clientStage || 'Review · Demo';
+    values.status = values.stage.startsWith('Closed') ? 'Closed · Demo' : (existing?.status || 'Abierto · Demo');
   }
   if (config.kind === 'document' && !values.fileName) values.fileName = existing?.fileName || 'archivo-demo.pdf';
   if (config.kind === 'task') values.status = existing?.status || 'Pendiente';
@@ -1050,6 +1298,10 @@ function upsert(action, existing) {
   const index = list.findIndex((item) => item.id === saved.id);
   if (index >= 0) list[index] = saved;
   else list.unshift(saved);
+  if (config.kind === 'claim' && existing && existing.stage !== saved.stage) {
+    state.claimMovements ||= [];
+    state.claimMovements.unshift({ id: makeId('PHASE'), claimId: saved.ocsId, from: existing.stage || 'Sin fase', to: saved.stage, actor: document.getElementById('roleSwitcher')?.value || 'Adjuster', at: now() });
+  }
   if (journeyStep === 'claim' && config.kind === 'claim') state.demoJourneyClaimId = saved.ocsId;
   if (config.kind === 'workflow') state.activeWorkflowId = saved.id;
   if (config.kind === 'client') {
@@ -1092,6 +1344,7 @@ function doDeleteConfirmed(kind, id) {
     const claimId = record.ocsId;
     ['tasks', 'documents', 'communications', 'events', 'portalEvents', 'reconciliations'].forEach((store) => (state[store] || []).forEach((item) => { if (item.relatedClaim === claimId) item.relatedClaim = ''; }));
     if (state.demoJourneyClaimId === claimId) state.demoJourneyClaimId = '';
+    if (state.activeDemoClaimId === claimId) state.activeDemoClaimId = state.claims[0]?.ocsId || '';
   }
   if (kind === 'client') state.claims.forEach((claim) => { if (claim.clientId === id) claim.clientId = ''; });
   logActivity(`${kind}-deleted`, `Eliminado ${kind} demo: ${label}`, id);
@@ -1143,6 +1396,7 @@ function installStyles() {
   style.textContent = `
     /* Visual direction adapted from the supplied dashboard reference: soft sage surfaces, quiet chrome, pastel status cards. */
     :root{--ink:#242a29;--muted:#74807b;--line:#e1e9e5;--canvas:#edf3f0;--white:#fff;--violet:#6558d9;--violet2:#efedff;--violet3:#dedaff;--navy:#252a31;--green:#328c70;--greenbg:#e5f4ed;--amber:#a66e32;--amberbg:#fff2df;--red:#bf6574;--redbg:#ffedf0;--blue:#5d79d5;--bluebg:#edf1ff;--shadow:0 6px 18px rgba(42,67,56,.055);--radius:16px}
+    .top{gap:10px;padding-left:16px;padding-right:16px}.topright{gap:6px}.demo-mode-banner{max-width:176px;overflow:hidden;text-overflow:ellipsis}
     body{background:var(--canvas)}.rail{background:#f4f8f6;border-color:#e1e9e5}.logo{background:#6558d9;border-radius:11px}.sidebar-expanded .railbtn.active,.railbtn.active{background:#e8e6ff;color:#5b4dcc}.top{background:#f5f8f6ed;border-color:#e1e9e5}.topnav{height:36px;padding:0 5px;border-radius:999px;background:#e8eeea}.topnav button{height:28px;border-radius:999px}.topnav button.active{background:#6558d9;color:#fff}.topnav button.active:after{display:none}.search{background:#f9fbfa;border-color:#e2eae6}.page{padding-top:27px}.h1{font-size:25px;letter-spacing:-.04em}.card{border-color:#e1e9e5;box-shadow:0 5px 16px rgba(42,67,56,.045);border-radius:16px}.btn{border-color:#dfe7e3;border-radius:10px}.btn.primary{background:#6558d9;border-color:#6558d9;box-shadow:0 4px 12px #6558d926}.filter,.tinybtn{border-color:#e0e8e4;background:#fafcfb}.tablewrap{border-radius:10px}.tab.active{color:#5b4dcc}.count{background:#efedff;color:#5b4dcc}.miniavatar,.railavatar{background:#ebe9ff;color:#5b4dcc}
     #dashboard .metric{border-color:transparent;box-shadow:none;min-height:103px}#dashboard .metric:nth-child(1){background:#e9efff}#dashboard .metric:nth-child(2){background:#fff0ed}#dashboard .metric:nth-child(3){background:#e5f3eb}#dashboard .metric:nth-child(4){background:#fff4df}#dashboard .metric:nth-child(5){background:#e6f2ef}#dashboard .metric:nth-child(1) .metricico{background:#dce5ff;color:#526bc5}#dashboard .metric:nth-child(2) .metricico{background:#ffe1dd;color:#bf6574}#dashboard .metric:nth-child(3) .metricico{background:#d7ecdf;color:#328c70}#dashboard .metric:nth-child(4) .metricico{background:#ffe8bd;color:#a66e32}#dashboard .metric:nth-child(5) .metricico{background:#d9ece6;color:#328c70}#dashboard .screenhead{align-items:center}#dashboard .screenhead .h1{font-size:28px}#dashboard .dashboardgrid>.card{border-color:#e3eae6}#dashboard .focusitem{border-color:#e8eeeb}#dashboard .calendarmini .sel{background:#6558d9}
     .demo-journey{margin:12px 0 16px;padding:16px 18px;background:linear-gradient(115deg,#fff 0%,#f7f8ff 100%);border-color:#e3e4f2}.demo-journey-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.demo-journey-header h2{margin:0;font-size:13px;letter-spacing:-.02em}.demo-journey-header p{margin:4px 0 0;color:var(--muted);font-size:9px}.demo-journey-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;list-style:none;margin:14px 0;padding:0}.demo-journey-steps li{display:grid;grid-template-columns:24px 1fr;grid-template-rows:auto auto;align-items:center;gap:2px 8px;min-width:0;padding:9px;border-radius:11px;background:#f6f7f7}.demo-journey-steps li.done{background:#e8f4ee}.demo-journey-steps li.current{background:#efedff;outline:1px solid #dcd8ff}.journey-number{grid-row:span 2;display:grid;place-items:center;width:23px;height:23px;border-radius:50%;background:#fff;color:#6257be;font-size:10px;font-weight:800}.done .journey-number{background:#d6ede1;color:#277b5c}.journey-label{font-size:9px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.journey-status{font-size:8px;color:var(--muted)}.demo-journey-footer{display:flex;align-items:center;gap:10px}.demo-journey-footer .btn{padding:7px 10px}.claim-related-demo{margin:12px 0}.claim-related-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.claim-related-item{display:grid;gap:5px;padding:9px;border-radius:10px;background:#f4f7f5;min-width:0}.claim-related-item button{border:0;background:none;padding:0;text-align:left;color:var(--violet);font-weight:750;font-size:9px}.claim-related-item small{font-size:8px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.portal-demo-documents{margin:12px 0}.portal-demo-document{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:10px}.full-demo-records{margin:12px 0}.full-demo-record-list{display:grid;gap:8px}
@@ -1153,6 +1407,8 @@ function installStyles() {
     .task-list-view{display:grid!important;grid-template-columns:1fr!important}.task-list-view .boardcol{min-width:0}.task-list-view .taskcard{max-width:none}.source-selected{outline:2px solid var(--violet)!important;background:var(--violet2)!important}.folder-view-demo tbody tr{display:grid;grid-template-columns:1fr;gap:4px;border-bottom:1px solid var(--line);padding:9px}.folder-view-demo tbody td{border:0}.screen .tab[role="tab"]{cursor:pointer}.screen .tab[role="tab"]:focus-visible,.screen .subnav button:focus-visible{outline:3px solid #a89dff88;outline-offset:1px}
     @media(min-width:621px) and (max-width:900px){.topright{max-width:calc(100vw - 516px);flex-wrap:wrap;justify-content:flex-end}.main,.page,.screen,.screen .grid,.screen .card{min-width:0;max-width:100%}.screen .grid,.screen .pagecols{grid-template-columns:minmax(0,1fr)!important}.screen .pagecols>*{min-width:0}.tablewrap{max-width:100%;overflow-x:auto;scrollbar-width:none}.tablewrap::-webkit-scrollbar{display:none}.screen .boardhead{flex-wrap:wrap}}
     .customer-claim-links{display:grid;gap:7px}.customer-claim-link{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}.customer-claim-link button{border:0;background:none;padding:0;text-align:left;color:var(--violet);font-weight:750;font-size:9px}.customer-claim-link small{font-size:8px;color:var(--muted)}
+    .demo-scenario-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.demo-scenario{display:grid;gap:6px;align-content:start;padding:11px;border:1px solid var(--line);border-radius:12px;background:#fbfcfb;min-width:0}.demo-scenario strong{font-size:10px}.demo-scenario small{min-height:28px;color:var(--muted);font-size:9px}.demo-scenario .btn{justify-self:start}.demo-activity-audit,.task-movement-history{margin:12px 0}.demo-audit-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:9px}.demo-audit-row small{color:var(--muted);text-align:right}.document-studio-controls{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:12px 0}.document-studio-controls .field{min-width:220px;flex:1}.document-studio-controls .field select{display:block;width:100%;margin-top:5px}.document-studio-mappings{display:grid;gap:7px}.document-studio-mapping{display:grid;grid-template-columns:minmax(90px,1fr) 24px minmax(140px,1fr) auto;gap:8px;align-items:center}.document-studio-mapping input,.document-studio-mapping select{min-width:0;width:100%;padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:10px}.document-studio-preview{margin-top:12px;padding:13px;border:1px solid var(--line);border-radius:10px;background:#f8faf9;white-space:pre-wrap;font-size:10px;line-height:1.7}.document-studio-preview b{color:var(--ink)}
+    @media(max-width:760px){.demo-scenario-list{grid-template-columns:1fr}.demo-scenario small{min-height:0}.demo-audit-row{grid-template-columns:1fr}.demo-audit-row small{text-align:left}.document-studio-controls{align-items:stretch}.document-studio-controls .field{min-width:100%}.document-studio-mapping{grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr)}.document-studio-mapping .btn{grid-column:3;justify-self:end}}
     @media(max-width:760px){.demo-journey-steps{grid-template-columns:1fr 1fr}.demo-journey-steps li:last-child{grid-column:1/-1}.claim-related-grid{grid-template-columns:1fr 1fr}.demo-journey-header{align-items:center}.customer-claim-link{align-items:flex-start;flex-direction:column;gap:4px}}
     @media(max-width:620px){.rail,body.sidebar-expanded .rail{display:none!important}body.mobile-nav-open:before{content:"";position:fixed;inset:0;background:#10182855;z-index:79}.nav-popover.show{position:fixed;inset:auto 0 0!important;width:auto!important;max-height:82vh!important;overflow:auto!important;padding:18px 16px 24px!important;border-radius:18px 18px 0 0!important;z-index:80}.nav-popover .mobile-sheet-head{display:flex;align-items:center;justify-content:space-between;padding:0 4px 12px;border-bottom:1px solid var(--line);margin-bottom:8px}.nav-popover .mobile-sheet-head strong{font-size:14px}.nav-popover .mobile-sheet-close{width:32px;height:32px;border:0;border-radius:50%;background:#f1f2f5;font-size:18px}.nav-popover .mobile-nav-group{border-bottom:1px solid #f0f1f5}.nav-popover .mobile-nav-group>button{height:auto;min-height:42px;justify-content:space-between;font-weight:750;font-size:10px;letter-spacing:.04em}.nav-popover .mobile-nav-group>button span:first-child{width:auto!important;flex:1;text-align:left}.nav-popover .mobile-nav-items{padding:0 0 8px}.nav-popover .mobile-nav-items button{height:auto;min-height:42px;font-size:12px}.nav-popover .mobile-nav-items[hidden]{display:none}}
     @media(max-width:620px){.full-demo-record{align-items:flex-start;flex-direction:column}.full-demo-record .actions{width:100%;flex-wrap:wrap}.local-row-actions{white-space:normal}}
@@ -1291,7 +1547,11 @@ function handleSemanticControl(button, event) {
   if (screenId === 'ai' && /^new chat$/i.test(label)) { state.aiMessages = []; state.aiPrompt = ''; save(); renderAiMessages(); toast('Conversación de demo reiniciada localmente'); return true; }
   if (screenId === 'ai' && /^open claim$/i.test(label)) { window.go?.('claim'); return true; }
   if (screenId === 'ai' && /^show source email$/i.test(label)) { window.go?.('email'); return true; }
-  if (screenId === 'customer' && /editar perfil/i.test(label)) { const client = clientByName('Maria Gonzalez'); openForm('new-client', client); return true; }
+    if (screenId === 'customer' && /editar perfil/i.test(label)) {
+      const current = state.claims.find((claim) => claim.ocsId === (window.currentClaimId || state.activeDemoClaimId || state.demoJourneyClaimId));
+      const client = (current?.clientId && state.clients.find((item) => item.id === current.clientId)) || clientByName(current?.customer || 'Maria Gonzalez');
+      openForm('new-client', client); return true;
+    }
   if (screenId === 'customer' && /más (reciente|antiguo) primero/i.test(label)) {
     state.moduleSorts ||= {}; state.moduleSorts.customer = state.moduleSorts.customer === 'oldest' ? 'newest' : 'oldest';
     const rows = [...screen.querySelectorAll('tbody tr')]; if (state.moduleSorts.customer === 'oldest') rows.reverse(); rows.forEach((row) => row.parentElement.append(row));
@@ -1341,17 +1601,15 @@ function handleSemanticControl(button, event) {
   }
   if (screenId === 'templates' && /^cancel$/i.test(label)) { window.go?.('documents'); return true; }
   if (screenId === 'templates' && /save mapping/i.test(label)) {
-    const mappings = [...screen.querySelectorAll('.mappingrow[data-local-mapping]')].map((row) => ({ pdfField: row.querySelector('input')?.value.trim() || '', ocsField: row.querySelector('select')?.value || '' }));
+    const mappings = [...(state.documentMappings || [])].map((mapping) => ({ pdfField: mapping.pdfField.trim(), ocsField: mapping.ocsField }));
     const invalid = mappings.find((mapping) => !mapping.pdfField);
-    if (invalid) { screen.querySelector('.mappingrow[data-local-mapping] input')?.focus(); toast('Completa el nombre del campo PDF antes de guardar el mapeo'); return true; }
-    state.templateMappings = mappings; saveSimulationRecord('template', { title: 'LOR · mapeo demo', type: 'Carta', visibility: 'Interno', format: 'PDF preview' }, 'Mapeo guardado localmente como template de demo'); return true;
+    if (invalid) { screen.querySelector('.document-studio-mapping input')?.focus(); toast('Completa o elimina los campos PDF vacíos antes de guardar el mapeo'); return true; }
+    state.templateMappings = mappings; state.templateMappingSavedAt = now();
+    saveSimulationRecord('template', { title: screen.querySelector('[data-studio-field="template"]')?.value || 'LOR · mapeo demo', type: 'Carta', visibility: 'Interno', format: 'PDF preview', mappings }, 'Mapeo guardado localmente como template de demo'); return true;
   }
   if (screenId === 'templates' && /add mapping/i.test(label)) {
-    const list = screen.querySelector('.mappingrow')?.parentElement; const row = document.createElement('div'); row.className = 'mappingrow'; row.dataset.localMapping = 'true';
-    const name = document.createElement('input'); name.placeholder = 'Nombre del campo PDF'; name.setAttribute('aria-label', 'Nombre del campo PDF');
-    const arrow = document.createElement('span'); arrow.textContent = '→';
-    const select = document.createElement('select'); select.setAttribute('aria-label', 'Campo OCS asociado'); ['Policyholder · display name', 'Loss address', 'Loss date', 'Carrier claim number'].forEach((v) => { const o = document.createElement('option'); o.textContent = v; select.append(o); });
-    row.append(name, arrow, select); list?.append(row); toast('Fila de mapeo local agregada'); return true;
+    state.documentMappings ||= []; state.documentMappings.push({ id: makeId('MAP'), pdfField: '', ocsField: 'Policyholder · nombre visible' }); save(); renderDocumentStudio();
+    screen.querySelector('.demo-document-studio')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); screen.querySelector('.document-studio-mapping:last-child input')?.focus(); toast('Campo agregado al Document Studio local'); return true;
   }
   if (screenId === 'templates' && /^(‹|›|1 \/ 2)$/i.test(label)) {
     state.templatePage = label === '›' ? 2 : label === '‹' ? 1 : (state.templatePage === 2 ? 2 : 1);
@@ -1512,7 +1770,7 @@ function installFullNavigationHandlers() {
   document.querySelectorAll('.more:not([data-screen])').forEach((item) => { item.setAttribute('role', 'button'); item.setAttribute('tabindex', '0'); });
   document.addEventListener('click', (event) => {
     const customerClaimButton = event.target.closest('[data-customer-claim-id]');
-    if (customerClaimButton) { event.preventDefault(); event.stopImmediatePropagation(); window.currentClaimId = customerClaimButton.dataset.customerClaimId; window.go?.('claim'); renderClaimRelationships(); return; }
+    if (customerClaimButton) { event.preventDefault(); event.stopImmediatePropagation(); window.currentClaimId = customerClaimButton.dataset.customerClaimId; state.activeDemoClaimId = window.currentClaimId; save(); window.go?.('claim'); renderClaimRelationships(); return; }
     const button = event.target.closest('[data-journey-step]'); if (!button) return;
     event.preventDefault(); event.stopImmediatePropagation();
     const id = button.dataset.journeyStep;
@@ -1566,6 +1824,7 @@ function installFullNavigationHandlers() {
 
 function installListeners() {
   installFullNavigationHandlers();
+  installWaveHandlers();
   document.querySelectorAll('#email .mailbox,#email .mailthread').forEach((item) => {
     item.setAttribute('role', 'button'); item.setAttribute('tabindex', '0'); item.style.cursor = 'pointer';
   });
@@ -1998,6 +2257,17 @@ function installListeners() {
       callback?.();
       return;
     }
+    if (action === 'task-move') {
+      const task = findEntity('task', body.dataset.editId);
+      const field = body.querySelector('[data-field="status"]');
+      if (!task || !field?.checkValidity()) { field?.reportValidity(); return; }
+      const previous = task.status || 'Pendiente'; const next = field.value;
+      task.status = next; task.updatedAt = now();
+      state.taskMovements ||= []; state.taskMovements.unshift({ id: makeId('MOVE'), taskId: task.id, title: task.title, from: previous, to: next, actor: document.getElementById('roleSwitcher')?.value || 'Adjuster', at: now() });
+      logActivity('task-moved', `Tarea ${task.title}: ${previous} → ${next}`, task.id); save();
+      document.getElementById('modalback').classList.remove('show'); delete body.dataset.formAction; delete body.dataset.editId; render();
+      toast('Movimiento guardado localmente en el historial demo'); return;
+    }
     if (action === 'claims-filter' || action === 'claims-save-view') {
       const fields = [...body.querySelectorAll('[data-field]')];
       const invalid = fields.find((field) => !field.checkValidity());
@@ -2099,6 +2369,58 @@ function installListeners() {
   }, true);
 }
 
+function installWaveHandlers() {
+  document.addEventListener('click', (event) => {
+    const scenario = event.target.closest('[data-demo-scenario]');
+    if (scenario) { event.preventDefault(); event.stopImmediatePropagation(); addDemoScenario(scenario.dataset.demoScenario); return; }
+    const studio = event.target.closest('[data-studio-action]');
+    if (studio) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const action = studio.dataset.studioAction;
+      if (action === 'add-mapping') {
+        state.documentMappings.push({ id: makeId('MAP'), pdfField: '', ocsField: 'Policyholder · nombre visible' });
+        save(); renderDocumentStudio(); document.querySelector('.document-studio-mapping:last-child input')?.focus(); return;
+      }
+      if (action === 'remove-mapping') {
+        const row = studio.closest('[data-mapping-id]'); state.documentMappings = state.documentMappings.filter((mapping) => mapping.id !== row?.dataset.mappingId);
+        save(); renderDocumentStudio(); toast('Campo retirado del mapeo local · Demo'); return;
+      }
+      if (action === 'preview' || action === 'generate') {
+        const missing = state.documentMappings.find((mapping) => !mapping.pdfField.trim());
+        if (missing) { document.querySelector(`[data-mapping-id="${CSS.escape(missing.id)}"] input`)?.focus(); toast('Completa o elimina los campos vacíos antes de previsualizar'); return; }
+        updateDocumentPreview({ generate: action === 'generate' }); return;
+      }
+    }
+    const recordButton = event.target.closest('[data-record-action="move"]');
+    if (recordButton) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const item = findEntity('task', recordButton.dataset.recordId); if (item) openTaskMoveDialog(item); return;
+    }
+  }, true);
+  document.addEventListener('input', (event) => {
+    const field = event.target.closest('[data-mapping-field="pdfField"]');
+    if (!field) return;
+    const row = field.closest('[data-mapping-id]'); const mapping = state.documentMappings.find((item) => item.id === row?.dataset.mappingId);
+    if (!mapping) return;
+    mapping.pdfField = field.value; save();
+  }, true);
+  document.addEventListener('change', (event) => {
+    const field = event.target.closest('[data-mapping-field="ocsField"]');
+    if (field) {
+      const row = field.closest('[data-mapping-id]'); const mapping = state.documentMappings.find((item) => item.id === row?.dataset.mappingId);
+      if (mapping) { mapping.ocsField = field.value; save(); renderDocumentStudio(); toast('Campo de origen actualizado localmente'); }
+      return;
+    }
+    if (event.target.id === 'roleSwitcher') { applyDemoRole(event.target.value); return; }
+    if (event.target.matches('[data-studio-field]')) {
+      const field = event.target.dataset.studioField;
+      if (field === 'template') state.selectedDocumentTemplate = event.target.value;
+      if (field === 'claim') state.selectedDocumentClaim = event.target.value;
+      state.documentPreview = null; save();
+    }
+  }, true);
+}
+
 function initialize() {
   installStyles();
   seedClaimFixtures();
@@ -2106,7 +2428,9 @@ function initialize() {
   if (state.agency) {
     applyAgency(state.agency);
     document.body.classList.remove('onboarding-mode');
-    window.go?.('dashboard');
+    const roleRoute = { Customer: 'portal', Mitigation: 'mitigation', Accounting: 'accounting', Admin: 'admin', Superadmin: 'superadmin' }[state.roleDemo] || 'dashboard';
+    if (state.roleDemo === 'Customer' && state.activeDemoClaimId) window.currentClaimId = state.activeDemoClaimId;
+    window.go?.(roleRoute);
   } else {
     document.body.classList.add('onboarding-mode');
     window.go?.('create-agency');
@@ -2128,6 +2452,7 @@ function initialize() {
     applyClaimPagination();
   };
   render();
+  ensureAccessibleControls();
 }
 
 function seedClaimFixtures() {
