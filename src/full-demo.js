@@ -316,6 +316,11 @@ function render() {
   renderAiMessages();
   renderTemplateMappings();
   renderEmailWorkspace();
+  renderDemoJourney();
+  renderClaimRelationships();
+  renderCustomerRelationships();
+  renderPortalDocuments();
+  syncDashboardDemoMetrics();
   const importNote = document.querySelector('#import .saved-mapping-note');
   if (state.importMapping) {
     const note = importNote || document.createElement('p'); note.className = 'module-note saved-mapping-note';
@@ -347,6 +352,132 @@ function render() {
     });
   });
   Object.entries(state.moduleFilters || {}).forEach(([screenId, filter]) => applyModuleFilter(screenId, filter));
+}
+
+function renderDemoJourney() {
+  const screen = document.getElementById('dashboard');
+  const head = screen?.querySelector('.screenhead');
+  if (!screen || !head) return;
+  let card = screen.querySelector('.demo-journey');
+  if (!card) {
+    card = document.createElement('section'); card.className = 'card demo-journey'; card.setAttribute('aria-labelledby', 'demo-journey-title');
+    head.after(card);
+  }
+  const claim = state.claims.find((item) => item.ocsId === state.demoJourneyClaimId);
+  const claimId = claim?.ocsId || '';
+  const steps = [
+    { id: 'claim', label: 'Crear un claim', screen: 'claims', kind: 'claim', done: Boolean(claim), seed: { customer: 'Sofia Rivera · demo', email: 'sofia.rivera@example.invalid', lossType: 'Agua', date: new Date().toISOString().slice(0, 10), state: 'Florida', address: 'Propiedad de demostración · Orlando', carrier: 'Carrier de prueba', assignee: 'Alex Parker', nextAction: 'Revisar evidencia demo' } },
+    { id: 'task', label: 'Asignar una tarea', screen: 'tasks', kind: 'task', done: Boolean(claimId && state.tasks.some((item) => item.relatedClaim === claimId)), seed: { title: 'Revisar fotos de daños · demo', relatedClaim: claimId, assignee: 'Alex Parker', priority: 'Alta', checklist: 'Confirmar archivo de ejemplo' } },
+    { id: 'document', label: 'Agregar un documento', screen: 'documents', kind: 'document', done: Boolean(claimId && state.documents.some((item) => item.relatedClaim === claimId)), seed: { title: 'Evidencia inicial · demo', relatedClaim: claimId, visibility: 'Requiere aprobación' } },
+    { id: 'communication', label: 'Preparar una comunicación', screen: 'email', kind: 'communication', done: Boolean(claimId && state.communications.some((item) => item.relatedClaim === claimId)), seed: { title: 'Seguimiento inicial · demo', channel: 'Email', contact: 'Sofia Rivera · contacto ficticio', assignee: 'Alex Parker', tag: 'Seguimiento', relatedClaim: claimId, content: 'Hola Sofia, estamos revisando la información de tu reclamo de demostración. Este borrador no se enviará.', status: 'Borrador local' } },
+    { id: 'approval', label: 'Revisar el borrador', screen: 'approvals', done: Boolean(claimId && state.communications.some((item) => item.relatedClaim === claimId && /Aprobado|Revisado/i.test(item.status || ''))), readOnly: true },
+  ];
+  const doneCount = steps.filter((step) => step.done).length;
+  const nextStep = steps.find((step) => !step.done);
+  card.replaceChildren();
+  const header = document.createElement('div'); header.className = 'demo-journey-header';
+  const copy = document.createElement('div');
+  const title = document.createElement('h2'); title.id = 'demo-journey-title'; title.textContent = 'Recorrido guiado del claim';
+  const description = document.createElement('p'); description.textContent = claim ? `${claim.ocsId} · ${claim.customer} · registros ficticios guardados en este navegador` : 'Cinco pasos conectados para explorar un reclamo de muestra. No se envían datos.';
+  copy.append(title, description);
+  const progress = document.createElement('span'); progress.className = 'pill violet'; progress.textContent = `${doneCount}/5 pasos`;
+  header.append(copy, progress); card.append(header);
+  const list = document.createElement('ol'); list.className = 'demo-journey-steps';
+  steps.forEach((step, index) => {
+    const item = document.createElement('li'); item.className = step.done ? 'done' : step === nextStep ? 'current' : 'locked';
+    const badge = document.createElement('span'); badge.className = 'journey-number'; badge.textContent = step.done ? '✓' : String(index + 1);
+    const label = document.createElement('span'); label.className = 'journey-label'; label.textContent = step.label;
+    const status = document.createElement('span'); status.className = 'journey-status'; status.textContent = step.done ? 'Listo · local' : step === nextStep ? 'Siguiente' : 'Pendiente';
+    item.append(badge, label, status); list.append(item);
+  });
+  card.append(list);
+  const footer = document.createElement('div'); footer.className = 'demo-journey-footer';
+  const action = document.createElement(nextStep ? 'button' : 'span'); action.className = nextStep ? 'btn primary' : 'pill green';
+  if (nextStep) { action.type = 'button'; action.dataset.journeyStep = nextStep.id; }
+  action.textContent = nextStep ? `Abrir paso · ${nextStep.label}` : 'Recorrido completado';
+  footer.append(action);
+  const note = document.createElement('span'); note.className = 'smalltxt'; note.textContent = 'Demo local · sin email, SMS, firma ni publicación reales'; footer.append(note);
+  card.append(footer);
+}
+
+function renderClaimRelationships() {
+  const screen = document.getElementById('claim'); if (!screen) return;
+  let panel = screen.querySelector('.claim-related-demo');
+  if (!panel) { panel = document.createElement('section'); panel.className = 'card claim-related-demo'; panel.setAttribute('aria-live', 'polite'); screen.querySelector('.screenhead')?.after(panel); }
+  const claimId = window.currentClaimId || state.demoJourneyClaimId || 'OCS-26-01482';
+  const records = [
+    ['Tareas', 'tasks', state.tasks.filter((item) => item.relatedClaim === claimId)],
+    ['Documentos', 'documents', state.documents.filter((item) => item.relatedClaim === claimId)],
+    ['Comunicaciones', 'email', state.communications.filter((item) => item.relatedClaim === claimId)],
+    ['Eventos', 'calendar', state.events.filter((item) => item.relatedClaim === claimId)],
+  ];
+  panel.replaceChildren();
+  const heading = document.createElement('div'); heading.className = 'cardhead';
+  const title = document.createElement('strong'); title.textContent = `Actividad relacionada · ${claimId}`;
+  const flag = document.createElement('span'); flag.className = 'pill blue'; flag.textContent = 'Datos locales'; heading.append(title, flag); panel.append(heading);
+  const grid = document.createElement('div'); grid.className = 'claim-related-grid';
+  records.forEach(([label, route, items]) => {
+    const box = document.createElement('div'); box.className = 'claim-related-item';
+    const button = document.createElement('button'); button.type = 'button'; button.dataset.screen = route; button.textContent = `${label} · ${items.length}`;
+    const detail = document.createElement('small'); detail.textContent = items.length ? items.slice(0, 2).map((item) => item.title || item.fileName || item.type || 'Registro demo').join(' · ') : 'Sin registros locales relacionados';
+    box.append(button, detail); grid.append(box);
+  });
+  panel.append(grid);
+}
+
+function renderPortalDocuments() {
+  const screen = document.getElementById('portal'); if (!screen) return;
+  let panel = screen.querySelector('.portal-demo-documents');
+  if (!panel) { panel = document.createElement('section'); panel.className = 'card portal-demo-documents'; panel.setAttribute('aria-live', 'polite'); screen.querySelector('.screenhead')?.after(panel); }
+  const claimId = state.demoJourneyClaimId || window.currentClaimId || 'OCS-26-01482';
+  const docs = state.documents.filter((item) => item.relatedClaim === claimId && /publicad|cliente/i.test(item.visibility || ''));
+  panel.replaceChildren();
+  const heading = document.createElement('div'); heading.className = 'cardhead';
+  const title = document.createElement('strong'); title.textContent = 'Documentos visibles en portal · Demo';
+  const flag = document.createElement('span'); flag.className = 'pill green'; flag.textContent = 'Sin publicar externamente'; heading.append(title, flag); panel.append(heading);
+  if (!docs.length) { const empty = document.createElement('p'); empty.className = 'smalltxt'; empty.textContent = 'No hay adjuntos marcados como visibles para este cliente en la demo.'; panel.append(empty); return; }
+  docs.forEach((doc) => { const row = document.createElement('div'); row.className = 'portal-demo-document'; const name = document.createElement('span'); name.textContent = doc.title || doc.fileName || 'Documento de demo'; const status = document.createElement('span'); status.className = 'pill green'; status.textContent = 'Visible · local'; row.append(name, status); panel.append(row); });
+}
+
+function renderCustomerRelationships() {
+  const screen = document.getElementById('customer'); if (!screen) return;
+  let panel = screen.querySelector('.customer-related-demo');
+  if (!panel) { panel = document.createElement('section'); panel.className = 'card customer-related-demo'; panel.setAttribute('aria-live', 'polite'); screen.querySelector('.screenhead')?.after(panel); }
+  const journeyClaim = state.claims.find((item) => item.ocsId === state.demoJourneyClaimId);
+  const selectedClient = journeyClaim?.clientId ? state.clients.find((item) => item.id === journeyClaim.clientId) : null;
+  const client = selectedClient || state.clients.find((item) => /Maria Gonzalez/i.test(item.name)) || null;
+  const name = client?.name || journeyClaim?.customer || 'Maria Gonzalez · fixture demo';
+  const claims = state.claims.filter((item) => (client && item.clientId === client.id) || item.customer?.toLocaleLowerCase().startsWith(name.toLocaleLowerCase()));
+  panel.replaceChildren();
+  const head = document.createElement('div'); head.className = 'cardhead';
+  const title = document.createElement('strong'); title.textContent = `Perfil 360 · ${name}`;
+  const flag = document.createElement('span'); flag.className = 'pill violet'; flag.textContent = 'Relaciones locales'; head.append(title, flag); panel.append(head);
+  const items = document.createElement('div'); items.className = 'customer-claim-links';
+  if (!claims.length) { const empty = document.createElement('p'); empty.className = 'smalltxt'; empty.textContent = 'Aún no hay claims enlazados a este perfil en la sesión demo.'; items.append(empty); }
+  claims.forEach((claim) => {
+    const row = document.createElement('div'); row.className = 'customer-claim-link';
+    const open = document.createElement('button'); open.type = 'button'; open.dataset.customerClaimId = claim.ocsId; open.textContent = `${claim.ocsId} · ${claim.lossType || 'Claim demo'}`;
+    const counts = document.createElement('small');
+    const tasks = state.tasks.filter((item) => item.relatedClaim === claim.ocsId).length;
+    const docs = state.documents.filter((item) => item.relatedClaim === claim.ocsId).length;
+    const communications = state.communications.filter((item) => item.relatedClaim === claim.ocsId).length;
+    counts.textContent = `${tasks} tareas · ${docs} documentos · ${communications} comunicaciones`;
+    row.append(open, counts); items.append(row);
+  });
+  panel.append(items);
+}
+
+function syncDashboardDemoMetrics() {
+  const metrics = [...document.querySelectorAll('#dashboard .metric')];
+  if (metrics.length < 4) return;
+  const localClaims = state.claims.filter((item) => !item.archived && /^OCS-DEMO-/i.test(item.ocsId || '')).length;
+  const pendingMessages = state.communications.filter((item) => /Borrador local|Revisado · demo/i.test(item.status || '')).length;
+  const amounts = [184 + localClaims, 16, 28 + state.tasks.length, 3 + pendingMessages];
+  metrics.slice(0, 4).forEach((metric, index) => {
+    const value = metric.querySelector('.metricvalue'); if (value) value.textContent = String(amounts[index]);
+    const foot = metric.querySelector('.metricfoot');
+    if (foot) { foot.dataset.originalText ||= foot.textContent.trim(); const added = index === 0 ? localClaims : index === 2 ? state.tasks.length : index === 3 ? pendingMessages : 0; foot.textContent = added ? `${foot.dataset.originalText} · +${added} demo local` : foot.dataset.originalText; }
+  });
 }
 
 function renderSavedClaimViews() {
@@ -447,6 +578,7 @@ function openDataViewDialog() {
   document.getElementById('modalTitle').textContent = 'Crear vista guardada';
   document.getElementById('modalDesc').textContent = 'La vista y su filtro se guardan solo en este navegador.';
   body.replaceChildren();
+  delete body.dataset.journeyStep;
   const wrap = document.createElement('div'); wrap.className = 'field'; const label = document.createElement('label'); label.htmlFor = 'demo-data-view-name'; label.textContent = 'Nombre de la vista';
   const input = document.createElement('input'); input.id = 'demo-data-view-name'; input.name = 'name'; input.dataset.field = 'name'; input.required = true; input.value = 'Mi vista demo';
   wrap.append(label, input); body.append(wrap); body.dataset.formAction = 'data-view'; delete body.dataset.editId;
@@ -836,7 +968,11 @@ function openForm(action, record) {
   title.textContent = `${record ? 'Editar' : ''} ${config.title}`.trim();
   description.textContent = 'Cambios ficticios guardados solo en este navegador. Nada se envía a servicios reales.';
   body.replaceChildren();
-  config.fields.forEach(([key, labelText, type, required, choices]) => {
+  delete body.dataset.journeyStep;
+  config.fields.forEach(([key, labelText, type, required, configuredChoices]) => {
+    const choices = key === 'relatedClaim' && Array.isArray(configuredChoices)
+      ? [configuredChoices[0], ...state.claims.map((claim) => claim.ocsId)]
+      : configuredChoices;
     const wrap = document.createElement('div');
     wrap.className = 'field';
     if (type === 'textarea') wrap.style.gridColumn = '1 / -1';
@@ -885,6 +1021,7 @@ function formValues() {
 
 function upsert(action, existing) {
   const body = document.getElementById('modalBody');
+  const journeyStep = body.dataset.journeyStep;
   const config = formMarkup[action];
   const fields = [...body.querySelectorAll('[data-field]')];
   const invalid = fields.find((field) => !field.checkValidity());
@@ -913,6 +1050,7 @@ function upsert(action, existing) {
   const index = list.findIndex((item) => item.id === saved.id);
   if (index >= 0) list[index] = saved;
   else list.unshift(saved);
+  if (journeyStep === 'claim' && config.kind === 'claim') state.demoJourneyClaimId = saved.ocsId;
   if (config.kind === 'workflow') state.activeWorkflowId = saved.id;
   if (config.kind === 'client') {
     state.claims.forEach((claim) => {
@@ -923,7 +1061,9 @@ function upsert(action, existing) {
   logActivity(existing ? `${config.kind}-updated` : `${config.kind}-created`, `${existing ? 'Actualizado' : 'Creado'} ${config.kind} demo: ${saved.title || saved.name || saved.ocsId}`, saved.id);
   save();
   document.getElementById('modalback').classList.remove('show');
+  delete body.dataset.journeyStep;
   render();
+  if (journeyStep) window.go?.('dashboard');
   toast(`${existing ? 'Cambios guardados' : 'Elemento creado'} localmente · Demo`);
 }
 
@@ -948,7 +1088,11 @@ function doDeleteConfirmed(kind, id) {
   }
   const key = entityStores[kind];
   state[key] = state[key].filter((item) => item.id !== id);
-  if (kind === 'claim') state.tasks.forEach((task) => { if (task.relatedClaim === record.ocsId) task.relatedClaim = ''; });
+  if (kind === 'claim') {
+    const claimId = record.ocsId;
+    ['tasks', 'documents', 'communications', 'events', 'portalEvents', 'reconciliations'].forEach((store) => (state[store] || []).forEach((item) => { if (item.relatedClaim === claimId) item.relatedClaim = ''; }));
+    if (state.demoJourneyClaimId === claimId) state.demoJourneyClaimId = '';
+  }
   if (kind === 'client') state.claims.forEach((claim) => { if (claim.clientId === id) claim.clientId = ''; });
   logActivity(`${kind}-deleted`, `Eliminado ${kind} demo: ${label}`, id);
   save();
@@ -1001,13 +1145,15 @@ function installStyles() {
     :root{--ink:#242a29;--muted:#74807b;--line:#e1e9e5;--canvas:#edf3f0;--white:#fff;--violet:#6558d9;--violet2:#efedff;--violet3:#dedaff;--navy:#252a31;--green:#328c70;--greenbg:#e5f4ed;--amber:#a66e32;--amberbg:#fff2df;--red:#bf6574;--redbg:#ffedf0;--blue:#5d79d5;--bluebg:#edf1ff;--shadow:0 6px 18px rgba(42,67,56,.055);--radius:16px}
     body{background:var(--canvas)}.rail{background:#f4f8f6;border-color:#e1e9e5}.logo{background:#6558d9;border-radius:11px}.sidebar-expanded .railbtn.active,.railbtn.active{background:#e8e6ff;color:#5b4dcc}.top{background:#f5f8f6ed;border-color:#e1e9e5}.topnav{height:36px;padding:0 5px;border-radius:999px;background:#e8eeea}.topnav button{height:28px;border-radius:999px}.topnav button.active{background:#6558d9;color:#fff}.topnav button.active:after{display:none}.search{background:#f9fbfa;border-color:#e2eae6}.page{padding-top:27px}.h1{font-size:25px;letter-spacing:-.04em}.card{border-color:#e1e9e5;box-shadow:0 5px 16px rgba(42,67,56,.045);border-radius:16px}.btn{border-color:#dfe7e3;border-radius:10px}.btn.primary{background:#6558d9;border-color:#6558d9;box-shadow:0 4px 12px #6558d926}.filter,.tinybtn{border-color:#e0e8e4;background:#fafcfb}.tablewrap{border-radius:10px}.tab.active{color:#5b4dcc}.count{background:#efedff;color:#5b4dcc}.miniavatar,.railavatar{background:#ebe9ff;color:#5b4dcc}
     #dashboard .metric{border-color:transparent;box-shadow:none;min-height:103px}#dashboard .metric:nth-child(1){background:#e9efff}#dashboard .metric:nth-child(2){background:#fff0ed}#dashboard .metric:nth-child(3){background:#e5f3eb}#dashboard .metric:nth-child(4){background:#fff4df}#dashboard .metric:nth-child(5){background:#e6f2ef}#dashboard .metric:nth-child(1) .metricico{background:#dce5ff;color:#526bc5}#dashboard .metric:nth-child(2) .metricico{background:#ffe1dd;color:#bf6574}#dashboard .metric:nth-child(3) .metricico{background:#d7ecdf;color:#328c70}#dashboard .metric:nth-child(4) .metricico{background:#ffe8bd;color:#a66e32}#dashboard .metric:nth-child(5) .metricico{background:#d9ece6;color:#328c70}#dashboard .screenhead{align-items:center}#dashboard .screenhead .h1{font-size:28px}#dashboard .dashboardgrid>.card{border-color:#e3eae6}#dashboard .focusitem{border-color:#e8eeeb}#dashboard .calendarmini .sel{background:#6558d9}
-    .full-demo-records{margin:12px 0}.full-demo-record-list{display:grid;gap:8px}
+    .demo-journey{margin:12px 0 16px;padding:16px 18px;background:linear-gradient(115deg,#fff 0%,#f7f8ff 100%);border-color:#e3e4f2}.demo-journey-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.demo-journey-header h2{margin:0;font-size:13px;letter-spacing:-.02em}.demo-journey-header p{margin:4px 0 0;color:var(--muted);font-size:9px}.demo-journey-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;list-style:none;margin:14px 0;padding:0}.demo-journey-steps li{display:grid;grid-template-columns:24px 1fr;grid-template-rows:auto auto;align-items:center;gap:2px 8px;min-width:0;padding:9px;border-radius:11px;background:#f6f7f7}.demo-journey-steps li.done{background:#e8f4ee}.demo-journey-steps li.current{background:#efedff;outline:1px solid #dcd8ff}.journey-number{grid-row:span 2;display:grid;place-items:center;width:23px;height:23px;border-radius:50%;background:#fff;color:#6257be;font-size:10px;font-weight:800}.done .journey-number{background:#d6ede1;color:#277b5c}.journey-label{font-size:9px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.journey-status{font-size:8px;color:var(--muted)}.demo-journey-footer{display:flex;align-items:center;gap:10px}.demo-journey-footer .btn{padding:7px 10px}.claim-related-demo{margin:12px 0}.claim-related-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.claim-related-item{display:grid;gap:5px;padding:9px;border-radius:10px;background:#f4f7f5;min-width:0}.claim-related-item button{border:0;background:none;padding:0;text-align:left;color:var(--violet);font-weight:750;font-size:9px}.claim-related-item small{font-size:8px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.portal-demo-documents{margin:12px 0}.portal-demo-document{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:10px}.full-demo-records{margin:12px 0}.full-demo-record-list{display:grid;gap:8px}
     .full-demo-record{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
     .full-demo-record-copy{display:grid;gap:3px;min-width:0}.full-demo-record-copy strong{font-size:11px}.full-demo-record-copy small{font-size:9px;color:var(--muted)}
     .local-row-actions{white-space:nowrap}.local-row-actions .btn{margin:2px}#dashboard .card.metric[role="button"],#dashboard .focusitem[role="button"]{cursor:pointer}#dashboard .card.metric[role="button"]:hover,#dashboard .focusitem[role="button"]:hover{outline:1px solid var(--violet3)}
     .saved-claim-views{display:flex;align-items:center;gap:6px;overflow:auto;padding:4px 0 10px;scrollbar-width:none}.saved-claim-views::-webkit-scrollbar{display:none}.demo-action-feedback{margin:10px 0;padding:11px 14px;border-color:var(--violet3);background:var(--violet2)}.demo-action-feedback strong{font-size:10px}.demo-action-feedback p{margin:4px 0 0}
     .task-list-view{display:grid!important;grid-template-columns:1fr!important}.task-list-view .boardcol{min-width:0}.task-list-view .taskcard{max-width:none}.source-selected{outline:2px solid var(--violet)!important;background:var(--violet2)!important}.folder-view-demo tbody tr{display:grid;grid-template-columns:1fr;gap:4px;border-bottom:1px solid var(--line);padding:9px}.folder-view-demo tbody td{border:0}.screen .tab[role="tab"]{cursor:pointer}.screen .tab[role="tab"]:focus-visible,.screen .subnav button:focus-visible{outline:3px solid #a89dff88;outline-offset:1px}
     @media(min-width:621px) and (max-width:900px){.topright{max-width:calc(100vw - 516px);flex-wrap:wrap;justify-content:flex-end}.main,.page,.screen,.screen .grid,.screen .card{min-width:0;max-width:100%}.screen .grid,.screen .pagecols{grid-template-columns:minmax(0,1fr)!important}.screen .pagecols>*{min-width:0}.tablewrap{max-width:100%;overflow-x:auto;scrollbar-width:none}.tablewrap::-webkit-scrollbar{display:none}.screen .boardhead{flex-wrap:wrap}}
+    .customer-claim-links{display:grid;gap:7px}.customer-claim-link{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}.customer-claim-link button{border:0;background:none;padding:0;text-align:left;color:var(--violet);font-weight:750;font-size:9px}.customer-claim-link small{font-size:8px;color:var(--muted)}
+    @media(max-width:760px){.demo-journey-steps{grid-template-columns:1fr 1fr}.demo-journey-steps li:last-child{grid-column:1/-1}.claim-related-grid{grid-template-columns:1fr 1fr}.demo-journey-header{align-items:center}.customer-claim-link{align-items:flex-start;flex-direction:column;gap:4px}}
     @media(max-width:620px){.rail,body.sidebar-expanded .rail{display:none!important}body.mobile-nav-open:before{content:"";position:fixed;inset:0;background:#10182855;z-index:79}.nav-popover.show{position:fixed;inset:auto 0 0!important;width:auto!important;max-height:82vh!important;overflow:auto!important;padding:18px 16px 24px!important;border-radius:18px 18px 0 0!important;z-index:80}.nav-popover .mobile-sheet-head{display:flex;align-items:center;justify-content:space-between;padding:0 4px 12px;border-bottom:1px solid var(--line);margin-bottom:8px}.nav-popover .mobile-sheet-head strong{font-size:14px}.nav-popover .mobile-sheet-close{width:32px;height:32px;border:0;border-radius:50%;background:#f1f2f5;font-size:18px}.nav-popover .mobile-nav-group{border-bottom:1px solid #f0f1f5}.nav-popover .mobile-nav-group>button{height:auto;min-height:42px;justify-content:space-between;font-weight:750;font-size:10px;letter-spacing:.04em}.nav-popover .mobile-nav-group>button span:first-child{width:auto!important;flex:1;text-align:left}.nav-popover .mobile-nav-items{padding:0 0 8px}.nav-popover .mobile-nav-items button{height:auto;min-height:42px;font-size:12px}.nav-popover .mobile-nav-items[hidden]{display:none}}
     @media(max-width:620px){.full-demo-record{align-items:flex-start;flex-direction:column}.full-demo-record .actions{width:100%;flex-wrap:wrap}.local-row-actions{white-space:normal}}
   `;
@@ -1364,6 +1510,28 @@ function installFullNavigationHandlers() {
     if (!tab.dataset.screen) { tab.setAttribute('role', 'tab'); tab.setAttribute('tabindex', '0'); tab.setAttribute('aria-selected', String(tab.classList.contains('active'))); }
   });
   document.querySelectorAll('.more:not([data-screen])').forEach((item) => { item.setAttribute('role', 'button'); item.setAttribute('tabindex', '0'); });
+  document.addEventListener('click', (event) => {
+    const customerClaimButton = event.target.closest('[data-customer-claim-id]');
+    if (customerClaimButton) { event.preventDefault(); event.stopImmediatePropagation(); window.currentClaimId = customerClaimButton.dataset.customerClaimId; window.go?.('claim'); renderClaimRelationships(); return; }
+    const button = event.target.closest('[data-journey-step]'); if (!button) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const id = button.dataset.journeyStep;
+    const claim = state.claims.find((item) => item.ocsId === state.demoJourneyClaimId);
+    const steps = {
+      claim: { route: 'claims', form: 'new-claim', seed: { customer: 'Sofia Rivera · demo', email: 'sofia.rivera@example.invalid', lossType: 'Agua', date: new Date().toISOString().slice(0, 10), state: 'Florida', address: 'Propiedad de demostración · Orlando', carrier: 'Carrier de prueba', assignee: 'Alex Parker', nextAction: 'Revisar evidencia demo' } },
+      task: { route: 'tasks', form: 'new-task', seed: { title: 'Revisar fotos de daños · demo', relatedClaim: claim?.ocsId || '', assignee: 'Alex Parker', priority: 'Alta', checklist: 'Confirmar archivo de ejemplo' } },
+      document: { route: 'documents', form: 'new-document', seed: { title: 'Evidencia inicial · demo', relatedClaim: claim?.ocsId || '', visibility: 'Requiere aprobación' } },
+      communication: { route: 'email', form: 'new-communication', seed: { title: 'Seguimiento inicial · demo', channel: 'Email', contact: `${claim?.customer || 'Cliente demo'} · contacto ficticio`, assignee: 'Alex Parker', tag: 'Seguimiento', relatedClaim: claim?.ocsId || '', content: 'Hola, estamos revisando la información de tu reclamo de demostración. Este borrador no se enviará.', status: 'Borrador local' } },
+      approval: { route: 'approvals', form: '' },
+    };
+    const step = steps[id]; if (!step) return;
+    window.go?.(step.route);
+    if (!step.form) { const saved = state.communications.find((item) => item.relatedClaim === claim?.ocsId); if (saved) saved.status = 'Revisado · demo · no enviado'; save(); toast('Borrador abierto en aprobaciones · no enviado'); render(); return; }
+    openForm(step.form);
+    const body = document.getElementById('modalBody'); body.dataset.journeyStep = id;
+    Object.entries(step.seed).forEach(([key, value]) => { const field = body.querySelector(`[data-field="${key}"]`); if (field && value !== undefined && value !== '') { field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); } });
+    const desc = document.getElementById('modalDesc'); desc.textContent = `Paso ${id} del recorrido guiado · datos ficticios guardados solo en este navegador. Nada se envía.`;
+  }, true);
   document.addEventListener('click', (event) => {
     const tab = event.target.closest('.screen.active .tab,.screen.active .subnav button');
     if (tab && !tab.dataset.screen) { event.preventDefault(); event.stopImmediatePropagation(); chooseTab(tab); return; }
