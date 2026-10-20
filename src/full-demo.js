@@ -7,6 +7,7 @@ const emptyState = () => ({
   tasks: [],
   events: [],
   templates: [],
+  signatures: [],
   users: [],
   workflows: [],
   documents: [],
@@ -15,10 +16,15 @@ const emptyState = () => ({
   communications: [],
   reconciliations: [],
   customFields: [],
+  tables: [],
   roles: [],
   approvalStatus: {},
   activity: [],
   savedViews: [],
+  savedReports: [],
+  savedDataViews: [],
+  importRuns: [],
+  backupPoints: [],
   controlActions: [],
 });
 
@@ -237,6 +243,7 @@ function render() {
   makeRecordPanel('dashboard', 'Tareas locales recientes', state.tasks.slice(0, 5), 'task', (item) => `${item.status} · ${item.priority}`);
   makeRecordPanel('calendar', 'Eventos locales', state.events, 'event', (item) => `${item.date || 'Sin fecha'} · ${item.relatedClaim || 'Agencia'}`);
   makeRecordPanel('documents', 'Templates creados en esta demo', state.templates, 'template', (item) => `${item.type} · ${item.visibility} · borrador local`);
+  makeRecordPanel('signatures', 'Paquetes de firma creados en esta demo', state.signatures, 'signature', (item) => `${item.signer} · ${item.provider} · ${item.status} · sin envío real`);
   makeRecordPanel('documents', 'Adjuntos ficticios', state.documents, 'document', (item) => `${item.fileName || 'Archivo de demo'} · ${item.visibility} · ${item.relatedClaim || 'Sin claim'}`);
   makeRecordPanel('admin', 'Usuarios y roles de demo', state.users, 'user', (item) => `${item.email} · ${item.role} · ${item.status}`);
   makeRecordPanel('admin', 'Roles y alcances configurables', state.roles, 'role', (item) => `${item.scope} · ${item.status}`);
@@ -249,6 +256,7 @@ function render() {
   makeRecordPanel('approvals', 'Borradores de demo para aprobar', state.communications, 'communication', (item) => `${item.channel} · ${item.status} · Simulación: no enviado`);
   makeRecordPanel('accounting', 'Notas de conciliación OCS', state.reconciliations, 'reconciliation', (item) => `${item.reference} · ${item.relatedClaim || 'Sin asociación'} · ${item.status}`);
   makeRecordPanel('customdata', 'Campos personalizados de demo', state.customFields, 'customfield', (item) => `${item.fieldType} · ${item.appliesTo} · local`);
+  makeRecordPanel('customdata', 'Tablas agregadas localmente', state.tables || [], 'table', (item) => `${item.primaryField} · ${item.description || 'Esquema ficticio local'}`);
   document.querySelectorAll('#approvals .approvalitem').forEach((item) => {
     const label = item.querySelector('b')?.textContent.trim(); const status = state.approvalStatus?.[label];
     if (status) { let badge = item.querySelector('.demo-approval-status'); if (!badge) { badge = document.createElement('span'); badge.className = 'pill blue demo-approval-status'; item.querySelector('.row')?.append(badge); } badge.textContent = status; }
@@ -268,6 +276,7 @@ function render() {
   if (sortButton && state.claimSort) sortButton.textContent = `↕ Sort ${state.claimSort === 'asc' ? 'A–Z' : 'Z–A'}`;
   applyClaimPagination();
   renderSavedClaimViews();
+  renderSavedDataViews();
   renderAiMessages();
   if (state.agency) applyAgency(state.agency);
   const languageButton = [...document.querySelectorAll('.topright button.tinybtn')].find((button) => /^(ES|EN)⌄?$/.test(button.textContent.trim()));
@@ -299,6 +308,27 @@ function renderSavedClaimViews() {
     button.textContent = view.name; button.dataset.claimView = String(index); strip.append(button);
   });
   tabs.after(strip);
+}
+
+function renderSavedDataViews() {
+  const list = document.querySelector('#customdata .subnav');
+  if (!list) return;
+  list.querySelectorAll('[data-saved-data-view]').forEach((button) => button.remove());
+  [...(state.savedDataViews || [])].reverse().forEach((view) => {
+    const button = document.createElement('button'); button.type = 'button'; button.dataset.savedDataView = view.id;
+    button.textContent = view.name; list.insertBefore(button, [...list.querySelectorAll('button')].find((item) => /create view/i.test(item.textContent)) || null);
+  });
+}
+
+function openDataViewDialog() {
+  const backdrop = document.getElementById('modalback'); const body = document.getElementById('modalBody');
+  document.getElementById('modalTitle').textContent = 'Crear vista guardada';
+  document.getElementById('modalDesc').textContent = 'La vista y su filtro se guardan solo en este navegador.';
+  body.replaceChildren();
+  const wrap = document.createElement('div'); wrap.className = 'field'; const label = document.createElement('label'); label.htmlFor = 'demo-data-view-name'; label.textContent = 'Nombre de la vista';
+  const input = document.createElement('input'); input.id = 'demo-data-view-name'; input.name = 'name'; input.dataset.field = 'name'; input.required = true; input.value = 'Mi vista demo';
+  wrap.append(label, input); body.append(wrap); body.dataset.formAction = 'data-view'; delete body.dataset.editId;
+  backdrop.querySelector('[data-action="modal-confirm"]').textContent = 'Guardar vista'; backdrop.classList.add('show'); input.focus();
 }
 
 function openClaimViewDialog(mode) {
@@ -552,6 +582,13 @@ const formMarkup = {
       ['format', 'Salida de demo', 'select', true, ['PDF preview', 'DOCX preview']],
     ],
   },
+  'new-signature': { title: 'Crear paquete de firma demo', kind: 'signature', fields: [
+    ['title', 'Nombre del paquete', 'text', true, 'Acuerdo de demostración'],
+    ['relatedClaim', 'Claim relacionado', 'select', false, ['Agencia · sin claim', ...state.claims.map((claim) => claim.ocsId)]],
+    ['signer', 'Firmante ficticio', 'text', true, 'Policyholder de demo'],
+    ['provider', 'Proveedor ilustrativo', 'select', true, ['OCS nativo · demo', 'DocuSign · sin conexión']],
+    ['status', 'Estado local', 'select', true, ['Borrador local', 'Pendiente de firma · demo']],
+  ] },
   'new-user': { title: 'Crear usuario de demo', kind: 'user', fields: [
     ['name', 'Nombre ficticio', 'text', true, ''], ['email', 'Email de ejemplo', 'email', true, 'usuario@example.invalid'],
     ['role', 'Rol ilustrativo', 'select', true, ['Admin', 'Adjuster', 'Assistant', 'Accounting', 'Mitigation', 'Customer']],
@@ -595,6 +632,10 @@ const formMarkup = {
     ['title', 'Etiqueta del campo', 'text', true, ''], ['fieldType', 'Tipo', 'select', true, ['Texto', 'Número', 'Fecha', 'Selección']],
     ['appliesTo', 'Sección', 'select', true, ['Claims', 'Clientes', 'Tareas']],
   ] },
+  'new-table': { title: 'Crear tabla demo', kind: 'table', fields: [
+    ['title', 'Nombre de la tabla', 'text', true, ''], ['primaryField', 'Campo principal', 'text', true, 'Nombre'],
+    ['description', 'Descripción local', 'text', false, 'Tabla ficticia para esta demo'],
+  ] },
   'new-role': { title: 'Crear rol de demo', kind: 'role', fields: [
     ['title', 'Nombre del rol', 'text', true, ''], ['scope', 'Alcance ficticio', 'select', true, ['Todos los claims de demo', 'Claims asignados', 'Solo lectura']],
     ['status', 'Estado', 'select', true, ['Activo · demo', 'Pausado']],
@@ -607,8 +648,8 @@ const formMarkup = {
   ] },
 };
 
-const entityStores = { claim: 'claims', task: 'tasks', client: 'clients', event: 'events', template: 'templates', user: 'users', role: 'roles', workflow: 'workflows', document: 'documents', support: 'supportTickets', portal: 'portalEvents', communication: 'communications', reconciliation: 'reconciliations', customfield: 'customFields' };
-const formForKind = { claim: 'new-claim', task: 'new-task', client: 'new-client', event: 'new-event', template: 'new-template', user: 'new-user', role: 'new-role', workflow: 'new-workflow', document: 'new-document', support: 'new-support', portal: 'new-portal', communication: 'new-communication', reconciliation: 'new-reconciliation', customfield: 'new-customfield', agency: 'new-agency' };
+const entityStores = { claim: 'claims', task: 'tasks', client: 'clients', event: 'events', template: 'templates', signature: 'signatures', table: 'tables', user: 'users', role: 'roles', workflow: 'workflows', document: 'documents', support: 'supportTickets', portal: 'portalEvents', communication: 'communications', reconciliation: 'reconciliations', customfield: 'customFields' };
+const formForKind = { claim: 'new-claim', task: 'new-task', client: 'new-client', event: 'new-event', template: 'new-template', signature: 'new-signature', table: 'new-table', user: 'new-user', role: 'new-role', workflow: 'new-workflow', document: 'new-document', support: 'new-support', portal: 'new-portal', communication: 'new-communication', reconciliation: 'new-reconciliation', customfield: 'new-customfield', agency: 'new-agency' };
 const collectionFor = (kind) => state[entityStores[kind]] || [];
 
 function openForm(action, record) {
@@ -787,13 +828,308 @@ function installStyles() {
     .full-demo-record-copy{display:grid;gap:3px;min-width:0}.full-demo-record-copy strong{font-size:11px}.full-demo-record-copy small{font-size:9px;color:var(--muted)}
     .local-row-actions{white-space:nowrap}.local-row-actions .btn{margin:2px}#dashboard .card.metric[role="button"],#dashboard .focusitem[role="button"]{cursor:pointer}#dashboard .card.metric[role="button"]:hover,#dashboard .focusitem[role="button"]:hover{outline:1px solid var(--violet3)}
     .saved-claim-views{display:flex;align-items:center;gap:6px;overflow:auto;padding:4px 0 10px;scrollbar-width:none}.saved-claim-views::-webkit-scrollbar{display:none}.demo-action-feedback{margin:10px 0;padding:11px 14px;border-color:var(--violet3);background:var(--violet2)}.demo-action-feedback strong{font-size:10px}.demo-action-feedback p{margin:4px 0 0}
+    .task-list-view{display:grid!important;grid-template-columns:1fr!important}.task-list-view .boardcol{min-width:0}.task-list-view .taskcard{max-width:none}.source-selected{outline:2px solid var(--violet)!important;background:var(--violet2)!important}.folder-view-demo tbody tr{display:grid;grid-template-columns:1fr;gap:4px;border-bottom:1px solid var(--line);padding:9px}.folder-view-demo tbody td{border:0}.screen .tab[role="tab"]{cursor:pointer}.screen .tab[role="tab"]:focus-visible,.screen .subnav button:focus-visible{outline:3px solid #a89dff88;outline-offset:1px}
     @media(max-width:620px){.rail,body.sidebar-expanded .rail{display:none!important}body.mobile-nav-open:before{content:"";position:fixed;inset:0;background:#10182855;z-index:79}.nav-popover.show{position:fixed;inset:auto 0 0!important;width:auto!important;max-height:82vh!important;overflow:auto!important;padding:18px 16px 24px!important;border-radius:18px 18px 0 0!important;z-index:80}.nav-popover .mobile-sheet-head{display:flex;align-items:center;justify-content:space-between;padding:0 4px 12px;border-bottom:1px solid var(--line);margin-bottom:8px}.nav-popover .mobile-sheet-head strong{font-size:14px}.nav-popover .mobile-sheet-close{width:32px;height:32px;border:0;border-radius:50%;background:#f1f2f5;font-size:18px}.nav-popover .mobile-nav-group{border-bottom:1px solid #f0f1f5}.nav-popover .mobile-nav-group>button{height:auto;min-height:42px;justify-content:space-between;font-weight:750;font-size:10px;letter-spacing:.04em}.nav-popover .mobile-nav-group>button span:first-child{width:auto!important;flex:1;text-align:left}.nav-popover .mobile-nav-items{padding:0 0 8px}.nav-popover .mobile-nav-items button{height:auto;min-height:42px;font-size:12px}.nav-popover .mobile-nav-items[hidden]{display:none}}
     @media(max-width:620px){.full-demo-record{align-items:flex-start;flex-direction:column}.full-demo-record .actions{width:100%;flex-wrap:wrap}.local-row-actions{white-space:normal}}
   `;
   document.head.append(style);
 }
 
+function chooseTab(tab) {
+  const screen = tab.closest('.screen');
+  if (!screen || tab.dataset.screen) return false;
+  const screenId = screen.id;
+  const label = tab.innerText.trim().replace(/\s+/g, ' ');
+  tab.parentElement.querySelectorAll('.tab,.subnav button').forEach((item) => {
+    item.classList.toggle('active', item === tab);
+    if (item.matches('.tab')) { item.setAttribute('role', 'tab'); item.setAttribute('aria-selected', String(item === tab)); }
+  });
+  state.uiViews ||= {};
+  state.uiViews[screenId] = label;
+  save();
+
+  if (screenId === 'claims') {
+    const filter = /my work/i.test(label) ? 'My claims' : /urgent/i.test(label) ? 'Urgent' : /awaiting carrier/i.test(label) ? 'Awaiting carrier' : /archive/i.test(label) ? 'Archived' : 'All claims';
+    applyClaimFilter(filter); return true;
+  }
+  if (screenId === 'claim') {
+    if (/contacts/i.test(label)) { window.go?.('customer'); return true; }
+    const selector = /activity/i.test(label) ? '.activity' : /overview/i.test(label) ? '.detailtop' : '';
+    if (selector) screen.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else if (/financial/i.test(label)) window.go?.('accounting');
+    toast(`${label} · vista del expediente demo`); return true;
+  }
+  if (screenId === 'tasks') {
+    if (/calendar/i.test(label)) { window.go?.('calendar'); return true; }
+    if (/activity log/i.test(label)) { window.go?.('support'); return true; }
+    const board = screen.querySelector('.board');
+    if (board) {
+      board.dataset.view = /my work/i.test(label) ? 'mine' : /list/i.test(label) ? 'list' : 'board';
+      board.classList.toggle('task-list-view', board.dataset.view !== 'board');
+      const cards = [...board.querySelectorAll('.taskcard')];
+      cards.forEach((card) => { card.hidden = board.dataset.view === 'mine' && !/alex parker|a\. parker|jordan rivera|j\. rivera/i.test(card.innerText); });
+      board.querySelector('.demo-task-empty')?.remove();
+      if (board.dataset.view === 'mine' && !cards.some((card) => !card.hidden)) {
+        const empty = document.createElement('p'); empty.className = 'smalltxt demo-task-empty'; empty.textContent = 'No hay tareas asignadas al rol demo seleccionado.'; board.prepend(empty);
+      }
+    }
+    toast(`Vista de tareas: ${label} · demo local`); return true;
+  }
+  if (screenId === 'documents') {
+    if (/template library/i.test(label)) { window.go?.('templates'); return true; }
+    if (/signature requests/i.test(label)) { window.go?.('signatures'); return true; }
+    if (/review queue/i.test(label)) { window.go?.('approvals'); return true; }
+    if (/client uploads/i.test(label)) { window.go?.('portal'); return true; }
+    if (/document activity/i.test(label)) { window.go?.('support'); return true; }
+    const query = /client-visible/i.test(label) ? 'client visible' : /^internal$/i.test(label) ? 'internal' : /generated/i.test(label) ? 'template' : /needs review/i.test(label) ? 'review' : '';
+    state.moduleFilters ||= {}; state.moduleFilters.documents = query; applyModuleFilter('documents', query);
+    toast(query ? `Documentos filtrados · ${label}` : 'Todos los documentos de demo'); return true;
+  }
+  if (screenId === 'customdata') {
+    if (tab.closest('.subnav')) {
+      if (tab.dataset.savedDataView) { const view = (state.savedDataViews || []).find((item) => item.id === tab.dataset.savedDataView); if (view) { state.moduleFilters ||= {}; state.moduleFilters.customdata = view.query || ''; applyModuleFilter('customdata', view.query || ''); toast(`Vista “${view.name}” aplicada`); } return true; }
+      if (/create view/i.test(label)) { openDataViewDialog(); return true; }
+      const query = /^all claims/i.test(label) ? '' : /my assigned/i.test(label) ? 'Jordan' : /awaiting carrier/i.test(label) ? 'carrier' : /urgent/i.test(label) ? 'urgent' : /closed archive/i.test(label) ? 'closed' : '';
+      state.moduleFilters ||= {}; state.moduleFilters.customdata = query; applyModuleFilter('customdata', query); toast(`Vista guardada aplicada · ${label}`); return true;
+    }
+    if (/^\+?\s*table$/i.test(label)) { openForm('new-table'); return true; }
+    const query = /^claims$/i.test(label) ? 'OCS-' : /^clients$/i.test(label) ? 'Maria' : /^properties$/i.test(label) ? 'Orlando' : /^participants$/i.test(label) ? 'Jordan' : /^tasks$/i.test(label) ? 'follow-up' : /^documents$/i.test(label) ? 'pdf' : '';
+    state.activeDataTable = label; state.moduleFilters ||= {}; state.moduleFilters.customdata = query;
+    applyModuleFilter('customdata', query); toast(`Tabla seleccionada · ${label} · datos demo`); return true;
+  }
+  if (screenId === 'automations') {
+    const query = /^drafts/i.test(label) ? 'draft' : /runs/i.test(label) ? 'run|error|history' : '';
+    state.moduleFilters ||= {}; state.moduleFilters.automations = query; applyModuleFilter('automations', query);
+    toast(`Automatizaciones: ${label} · simulación local`); return true;
+  }
+  if (screenId === 'signatures') {
+    const rows = [...screen.querySelectorAll('tbody tr')];
+    const matcher = /^all envelopes/i.test(label) ? null : /needs my action|waiting on signer/i.test(label) ? /pending|waiting|sent/i : /completed/i.test(label) ? /completed/i : /declined|expired/i.test(label) ? /declined|expired/i : null;
+    rows.forEach((row) => { row.hidden = Boolean(matcher && !matcher.test(row.innerText)); });
+    screen.querySelector('.demo-signature-empty')?.remove();
+    if (matcher && !rows.some((row) => !row.hidden)) {
+      const empty = document.createElement('p'); empty.className = 'smalltxt demo-signature-empty'; empty.setAttribute('role', 'status'); empty.textContent = `No hay paquetes en “${label}” dentro de los datos ficticios.`; screen.querySelector('.tablewrap')?.after(empty);
+    }
+    toast(`Paquetes filtrados · ${label} · demo`); return true;
+  }
+  if (screenId === 'import' && tab.closest('.subnav')) {
+    const step = Number(label.match(/^\d+/)?.[0] || 1);
+    state.importStep = step; save();
+    screen.querySelectorAll('.stepper span').forEach((dot, index) => dot.classList.toggle('on', index < Math.ceil(step * 5 / 7)));
+    const title = screen.querySelector('.pagecols > .card:last-child .cardtitle');
+    if (title) title.textContent = ['Choose source and verification date', 'Select source tables or sheets', 'Map source fields to OCS', 'Match synthetic customer records', 'Resolve sample conflicts', 'Review the local import preview', 'Confirm this demo preview'][step - 1] || 'Import demo';
+    const status = screen.querySelector('.pagecols > .card:last-child .messagepreview');
+    if (status) status.textContent = `Paso ${step} de 7 · ${label.replace(/^\d+\s*·\s*/, '')}. Vista previa con datos ficticios; no se consulta ni modifica ningún servicio.`;
+    toast(`Paso ${step}/7 seleccionado · sin importación externa`); return true;
+  }
+  if (screenId === 'admin' && tab.closest('.subnav')) {
+    const route = /users|roles/i.test(label) ? 'admin' : /custom field/i.test(label) ? 'customdata' : /claim process|required documents/i.test(label) ? 'workflows' : /automation/i.test(label) ? 'automations' : /portal visibility/i.test(label) ? 'portal' : /offline/i.test(label) ? 'offline' : /branding|language/i.test(label) ? 'admin' : /AI providers/i.test(label) ? 'ai' : /retention|backup/i.test(label) ? 'backups' : 'admin';
+    if (route !== 'admin') { window.go?.(route); return true; }
+    toast(`Configuración seleccionada · ${label} · demo`); return true;
+  }
+  if (tab.closest('.subnav') && screenId === 'templates') return false;
+  toast(`Vista seleccionada · ${label} · datos ficticios`); return true;
+}
+
+function openLocalFileDialog(titleText = 'Seleccionar archivo local de demo') {
+  const backdrop = document.getElementById('modalback'); const body = document.getElementById('modalBody');
+  document.getElementById('modalTitle').textContent = titleText;
+  document.getElementById('modalDesc').textContent = 'El archivo solo se previsualiza en este navegador; no se sube ni se comparte.';
+  body.replaceChildren();
+  const label = document.createElement('label'); label.className = 'field'; label.textContent = 'Archivo de prueba';
+  const input = document.createElement('input'); input.type = 'file'; input.name = 'localDemoFile'; input.setAttribute('aria-label', 'Archivo de prueba local');
+  label.append(input); body.append(label); body.dataset.formAction = 'local-file'; delete body.dataset.editId;
+  backdrop.querySelector('[data-action="modal-confirm"]').textContent = 'Cerrar vista previa'; backdrop.classList.add('show'); input.focus();
+}
+
+function saveSimulationRecord(kind, fields, message) {
+  const record = { id: makeId(kind.toUpperCase()), ...fields, status: fields.status || 'Demo local', createdAt: now(), updatedAt: now() };
+  state[entityStores[kind]].unshift(record); logActivity(`${kind}-created`, message, record.id); save(); render(); toast(message); return record;
+}
+
+function handleSemanticControl(button, event) {
+  const screen = button.closest('.screen'); const screenId = screen?.id || '';
+  const label = button.innerText.trim().replace(/\s+/g, ' '); const lower = label.toLocaleLowerCase();
+  const selectedClaim = state.claims.find((claim) => /OCS-26-01482/i.test(screen?.innerText || '') && claim.ocsId === 'OCS-26-01482');
+  if (screenId === 'claim' && /edit details/i.test(label)) { openForm('new-claim', selectedClaim); return true; }
+  if (screenId === 'claim' && /filter activity/i.test(label)) { openModuleFilterDialog('claim', 'actividad del claim'); return true; }
+  if (screenId === 'claim' && /load earlier activity/i.test(label)) {
+    const activity = screen.querySelector('.activity'); const row = document.createElement('div'); row.className = 'activityrow'; row.innerHTML = '<span class="activityicon">◷</span><div><b>Actividad anterior de demostración</b><p>Nota histórica sintética cargada localmente para mostrar la cronología.</p><small>Oct 10 · Alex Parker · Solo demo</small></div>'; activity?.prepend(row); button.disabled = true; button.textContent = 'No hay más actividad · Demo'; return true;
+  }
+  if (screenId === 'claim' && label === '•••') { window.go?.('viewer'); return true; }
+  if (screenId === 'ai' && /^new chat$/i.test(label)) { state.aiMessages = []; state.aiPrompt = ''; save(); renderAiMessages(); toast('Conversación de demo reiniciada localmente'); return true; }
+  if (screenId === 'ai' && /^open claim$/i.test(label)) { window.go?.('claim'); return true; }
+  if (screenId === 'ai' && /^show source email$/i.test(label)) { window.go?.('email'); return true; }
+  if (screenId === 'customer' && /editar perfil/i.test(label)) { const client = clientByName('Maria Gonzalez'); openForm('new-client', client); return true; }
+  if (screenId === 'customer' && /más reciente primero/i.test(label)) { const rows = [...screen.querySelectorAll('tbody tr')]; rows.reverse().forEach((row) => row.parentElement.append(row)); toast('Historial ordenado · demo local'); return true; }
+  if (screenId === 'portal') {
+    if (/view as spanish/i.test(label) || /^(en|es)⌄$/i.test(label)) {
+      state.portalLanguage = /spanish|^es/i.test(label) ? 'es' : 'en'; save();
+      const title = screen.querySelector('.clientbody h2'); if (title) title.textContent = state.portalLanguage === 'es' ? 'Tu reclamo está en revisión' : 'Your claim is under review';
+      toast(`Idioma de portal: ${state.portalLanguage.toUpperCase()} · demo local`); return true;
+    }
+    if (/configure portal visibility/i.test(label)) { window.go?.('admin'); return true; }
+    if (/^view all$/i.test(label)) { window.go?.('documents'); return true; }
+    if (/^help$/i.test(label)) { window.go?.('support'); return true; }
+    if (/chat with ocs assistant/i.test(label)) { window.go?.('ai'); return true; }
+    if (/request an agent/i.test(label)) { window.go?.('support'); return true; }
+    if (/ask a question|message your claim team/i.test(label)) { openForm('new-communication'); return true; }
+    if (/upload photos/i.test(label)) { openLocalFileDialog('Subir fotos · vista previa local'); return true; }
+    if (/^confirm$/i.test(label)) {
+      const record = saveSimulationRecord('portal', { title: 'Cita confirmada desde portal demo', type: 'Cita', relatedClaim: 'OCS-26-01482', status: 'Confirmado · demo' }, 'Cita confirmada localmente · no se notificó a nadie');
+      const badge = screen.querySelector('.eventrow .pill'); if (badge) badge.textContent = record.status; return true;
+    }
+  }
+  if (screenId === 'email' && /^preview$/i.test(label)) {
+    const row = button.closest('tr,.inboxitem,.emailrow');
+    const body = document.getElementById('modalBody'); body.replaceChildren();
+    const preview = document.createElement('p'); preview.className = 'smalltxt'; preview.textContent = row?.innerText || 'Vista previa de un mensaje ficticio. No se accedió a un buzón.'; body.append(preview);
+    document.getElementById('modalTitle').textContent = 'Vista previa de correo demo'; document.getElementById('modalDesc').textContent = 'Contenido sintético · sin conexión a Gmail.'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if ((screenId === 'email' || screenId === 'phone') && /compose|new sms/i.test(label)) { openForm('new-communication'); return true; }
+  if ((screenId === 'email' || screenId === 'phone') && /^(send|review & send)$/i.test(label)) {
+    const content = screen.querySelector('textarea')?.value.trim() || 'Borrador de prueba';
+    saveSimulationRecord('communication', { title: screenId === 'phone' ? 'SMS de demostración' : 'Respuesta de demostración', channel: screenId === 'phone' ? 'SMS' : 'Email', contact: 'Contacto ficticio', content, relatedClaim: 'OCS-26-01482', status: 'Borrador local · requiere aprobación' }, 'Borrador creado para aprobación · no se envió');
+    window.go?.('approvals'); return true;
+  }
+  if (screenId === 'email' && /^change claim$/i.test(label)) { openForm('new-communication'); return true; }
+  if (screenId === 'email' && /^attach file$/i.test(label)) { openLocalFileDialog('Adjuntar archivo · solo demo local'); return true; }
+  if (screenId === 'phone' && /details|open thread|match contact/i.test(label)) {
+    if (/match contact/i.test(label)) { openForm('new-client'); return true; }
+    const row = button.closest('tr,.activityrow,.inboxitem'); const body = document.getElementById('modalBody'); body.replaceChildren();
+    const detail = document.createElement('p'); detail.className = 'smalltxt'; detail.textContent = row?.innerText || 'Registro de llamada sintético'; body.append(detail);
+    document.getElementById('modalTitle').textContent = 'Actividad de llamada · demo'; document.getElementById('modalDesc').textContent = 'Registro ficticio · ninguna llamada se realizó.'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'templates' && /^cancel$/i.test(label)) { window.go?.('documents'); return true; }
+  if (screenId === 'templates' && /save mapping/i.test(label)) {
+    saveSimulationRecord('template', { title: 'LOR · mapeo demo', type: 'Carta', visibility: 'Interno', format: 'PDF preview' }, 'Mapeo guardado localmente como template de demo'); return true;
+  }
+  if (screenId === 'templates' && /add mapping/i.test(label)) {
+    const list = screen.querySelector('.mappingrow')?.parentElement; const row = document.createElement('div'); row.className = 'mappingrow';
+    const name = document.createElement('input'); name.placeholder = 'Nombre del campo PDF'; name.setAttribute('aria-label', 'Nombre del campo PDF');
+    const arrow = document.createElement('span'); arrow.textContent = '→';
+    const select = document.createElement('select'); select.setAttribute('aria-label', 'Campo OCS asociado'); ['Policyholder · display name', 'Loss address', 'Loss date', 'Carrier claim number'].forEach((v) => { const o = document.createElement('option'); o.textContent = v; select.append(o); });
+    row.append(name, arrow, select); list?.append(row); toast('Fila de mapeo local agregada'); return true;
+  }
+  if (screenId === 'templates' && /^(‹|›|1 \/ 2)$/i.test(label)) {
+    state.templatePage = label === '›' ? 2 : label === '‹' ? 1 : (state.templatePage === 2 ? 2 : 1);
+    const subtitle = screen.querySelector('.cardsub'); if (subtitle) subtitle.textContent = `Letter of Representation — page ${state.templatePage} of 2 · Preview demo`;
+    save(); toast(`Página ${state.templatePage} del template · Demo`); return true;
+  }
+  if ((screenId === 'workflows' || screenId === 'automations') && /publish/i.test(label)) {
+    const name = screen.querySelector('.cardtitle')?.textContent.trim() || 'Regla de demo';
+    const existing = state.workflows.find((item) => item.title === name);
+    if (existing) { existing.status = 'Activo · demo'; existing.updatedAt = now(); save(); render(); }
+    else saveSimulationRecord('workflow', { title: name, trigger: 'Validación local de muestra', action: 'Ejecutar solo dentro de la demo', status: 'Activo · demo' }, 'Versión activada únicamente en la demostración');
+    toast('Versión activada únicamente en la demostración'); return true;
+  }
+  if ((screenId === 'workflows' || screenId === 'automations') && /add condition|add action/i.test(label)) {
+    const row = document.createElement('div'); row.className = 'messagepreview mt'; row.textContent = `${/condition/i.test(label) ? 'Condición' : 'Acción'} nueva · configuración sintética pendiente`;
+    button.closest('.row')?.before(row); toast(`${row.textContent} · demo`); return true;
+  }
+  if ((screenId === 'workflows' || screenId === 'automations') && /version history|run history/i.test(label)) { window.go?.('support'); return true; }
+  if (screenId === 'reports' && /save report/i.test(label)) {
+    state.savedReports ||= []; state.savedReports.unshift({ id: makeId('RPT'), title: 'Reporte de desempeño · demo', filters: state.moduleFilters?.reports || '', createdAt: now() }); save(); toast('Reporte guardado en localStorage · Demo'); return true;
+  }
+  if (screenId === 'reports' && /^export$/i.test(label)) {
+    const rows = [['Métrica', 'Valor ficticio'], ['Claims abiertos', '126'], ['Días medianos por fase', '18.4'], ['Tareas a tiempo', '92%']];
+    const blob = new Blob([rows.map((row) => row.join(',')).join('\n')], { type: 'text/csv;charset=utf-8' }); const url = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = url; link.download = 'ocs-reporte-demo.csv'; link.click(); URL.revokeObjectURL(url); toast('Exportación sintética descargada localmente'); return true;
+  }
+  if (screenId === 'reports' && /open assignments/i.test(label)) { window.go?.('tasks'); return true; }
+  if (screenId === 'reports' && /metric definition/i.test(label)) {
+    const body = document.getElementById('modalBody'); body.replaceChildren(); const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = 'Los KPIs del reporte se calculan sobre fixtures sintéticos de la demo; no representan datos reales ni una consulta a fuentes externas.'; body.append(p);
+    document.getElementById('modalTitle').textContent = 'Definición de métricas'; document.getElementById('modalDesc').textContent = 'Origen y alcance · Demo'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'signatures' && /send reminder/i.test(label)) {
+    const row = screen.querySelector('tbody tr'); if (row) { const status = row.querySelector('.pill'); if (status) status.textContent = 'Recordatorio simulado · no enviado'; }
+    toast('Recordatorio registrado en demo · no se envió'); return true;
+  }
+  if (screenId === 'signatures' && /open signed preview/i.test(label)) { window.go?.('viewer'); return true; }
+  if (screenId === 'integrations') {
+    const title = button.closest('.card')?.querySelector('.cardtitle')?.textContent.trim() || label;
+    const body = document.getElementById('modalBody'); body.replaceChildren();
+    const p = document.createElement('p'); p.className = 'smalltxt'; p.textContent = `${title}: esta conexión permanece desconectada. La configuración se representa localmente y no se guardan credenciales.`; body.append(p);
+    document.getElementById('modalTitle').textContent = `Configuración demo · ${title}`; document.getElementById('modalDesc').textContent = 'Sin API, OAuth ni cuentas reales.'; delete body.dataset.formAction; document.getElementById('modalback').classList.add('show'); return true;
+  }
+  if (screenId === 'customdata' && /preview as user/i.test(label)) { toast('Vista previa del esquema para el rol seleccionado · sin permisos reales'); return true; }
+  if (screenId === 'superadmin' && /create agency/i.test(label)) { openForm('new-agency', state.agency); return true; }
+  if (screenId === 'access' && /request access/i.test(label)) {
+    saveSimulationRecord('support', { title: 'Solicitud de acceso temporal', requester: 'Admin demo', owner: 'Sin asignar', status: 'Pendiente de aprobación' }, 'Solicitud registrada localmente · requiere aprobación de la agencia'); return true;
+  }
+  if (screenId === 'backups' && /create backup/i.test(label)) {
+    state.backupPoints ||= []; state.backupPoints.unshift({ id: makeId('BKP'), label: `Copia local demo · ${new Date().toLocaleString()}`, createdAt: now(), status: 'Vista previa · sin archivos externos' }); save();
+    const panel = screen.querySelector('.screenhead'); const note = document.createElement('p'); note.className = 'module-note'; note.textContent = state.backupPoints[0].label + ' · no se generó ni subió ningún archivo.'; panel.after(note); toast('Punto de recuperación simulado localmente'); return true;
+  }
+  if (screenId === 'backups' && /preview restore/i.test(label)) {
+    askConfirmation('Vista previa de restauración', 'Esta simulación no restaura, borra ni reemplaza datos. Los datos de muestra permanecen intactos.', () => toast('Vista previa revisada · sin cambios aplicados'), 'Entendido'); return true;
+  }
+  if (screenId === 'offline' && /save offline policy/i.test(label)) { toast('Política offline guardada solo como preferencia de demo'); return true; }
+  if (screenId === 'viewer') {
+    if (/^download$/i.test(label)) { toast('El archivo mostrado es una vista sintética; no hay documento real para descargar'); return true; }
+    if (/add version/i.test(label)) { openLocalFileDialog('Agregar versión · vista previa local'); return true; }
+    if (/change visibility/i.test(label)) { toast('Visibilidad de prueba actualizada localmente · sin publicar al portal'); return true; }
+    if (/rotate|zoom|^\+|^−/i.test(label)) { const page = screen.querySelector('.card[style*="background:#e9e9eb"] > div[style*="background:#fff"]'); if (page) page.style.transform = label.includes('Rotate') ? `rotate(${(Number(page.dataset.rotation || 0) + 90) % 360}deg)` : label === '+' ? 'scale(1.08)' : label === '−' ? 'scale(.92)' : page.style.transform; return true; }
+  }
+  if ((screenId === 'support' || screenId === 'mitigation') && /open ticket|contact agency support/i.test(label)) { window.go?.('support'); return true; }
+  if (screenId === 'admin' && /save configuration/i.test(label)) { logActivity('settings-saved', 'Configuración de agencia guardada en demo', 'admin'); save(); toast('Configuración guardada localmente · sin permisos reales'); return true; }
+  if (screenId === 'tasks' && /^import task list$/i.test(label)) { openLocalFileDialog('Importar tareas · vista previa local'); return true; }
+  if (screenId === 'documents' && /^folder view/i.test(label)) { const table = screen.querySelector('.tablewrap'); table?.classList.toggle('folder-view-demo'); toast('Vista de carpetas alternada · demo local'); return true; }
+  if (screenId === 'documents' && /^filter$/i.test(label)) { openModuleFilterDialog('documents', 'documentos'); return true; }
+  if (screenId === 'documents' && /upload files/i.test(label)) { openLocalFileDialog('Cargar documentos · vista previa local'); return true; }
+  if (screenId === 'tasks' && /lo tomo/i.test(label)) {
+    const card = button.closest('.taskcard'); if (card) { const owner = document.createElement('span'); owner.className = 'pill blue'; owner.textContent = 'Asignada a mí · demo'; card.querySelector('.taskfoot')?.replaceChildren(owner); }
+    toast('Tarea asignada al usuario demo'); return true;
+  }
+  if (screenId === 'calendar' && /^(‹|›)$/.test(label)) {
+    state.calendarOffset = (state.calendarOffset || 0) + (label === '›' ? 1 : -1); const base = new Date(2026, 9 + state.calendarOffset, 1);
+    const heading = screen.querySelector('.cardtitle'); if (heading) heading.textContent = base.toLocaleDateString('es', { month: 'long', year: 'numeric' }); save(); toast('Mes de calendario actualizado · datos de ejemplo'); return true;
+  }
+  if (screenId === 'import' && /select source/i.test(label)) {
+    state.importSource = button.closest('.card')?.querySelector('b')?.textContent.trim() || 'Fuente demo';
+    screen.querySelectorAll('.pagecols .card.flat.center').forEach((card) => card.classList.toggle('source-selected', card.contains(button)));
+    save(); toast(`${state.importSource} seleccionada · solo referencia, sin conexión`); return true;
+  }
+  if (screenId === 'import' && /run preview/i.test(label)) {
+    state.importRuns ||= []; state.importRuns.unshift({ id: makeId('PREVIEW'), source: state.importSource || 'Airtable · datos sintéticos', at: now(), status: 'Preview local · no importado' }); save();
+    const status = screen.querySelector('.screenhead .pill'); if (status) status.textContent = 'Preview local · no importado'; toast('Vista previa de migración simulada · no se leyó ni escribió ninguna fuente'); return true;
+  }
+  return false;
+}
+
+function installFullNavigationHandlers() {
+  document.querySelectorAll('.screen .tab,.screen .subnav button').forEach((tab) => {
+    if (!tab.dataset.screen) { tab.setAttribute('role', 'tab'); tab.setAttribute('tabindex', '0'); tab.setAttribute('aria-selected', String(tab.classList.contains('active'))); }
+  });
+  document.querySelectorAll('.more:not([data-screen])').forEach((item) => { item.setAttribute('role', 'button'); item.setAttribute('tabindex', '0'); });
+  document.addEventListener('click', (event) => {
+    const tab = event.target.closest('.screen.active .tab,.screen.active .subnav button');
+    if (tab && !tab.dataset.screen) { event.preventDefault(); event.stopImmediatePropagation(); chooseTab(tab); return; }
+    const more = event.target.closest('.screen.active .more:not([data-screen])');
+    if (more) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const screenId = more.closest('.screen')?.id; const label = more.innerText.trim();
+      if (screenId === 'claim' && label === '•••') { window.go?.('viewer'); return; }
+      const route = screenId === 'claim' && label === 'Full task audit' ? 'tasks'
+        : screenId === 'ai' && /audit|versions/i.test(label) ? 'support'
+          : screenId === 'portal' && /^view$/i.test(label) ? 'viewer' : '';
+      if (route) { window.go?.(route); return; }
+      window.go?.(screenId === 'portal' ? 'viewer' : screenId === 'claim' ? 'documents' : 'support'); return;
+    }
+    const button = event.target.closest('.screen.active button');
+    if (button && handleSemanticControl(button, event)) { event.preventDefault(); event.stopImmediatePropagation(); }
+  }, true);
+  document.addEventListener('keydown', (event) => {
+    if (!['Enter', ' '].includes(event.key)) return;
+    const tab = event.target.closest?.('.screen.active .tab,.screen.active .subnav button');
+    if (tab && !tab.dataset.screen) { event.preventDefault(); tab.click(); }
+    const more = event.target.closest?.('.screen.active .more[role="button"]');
+    if (more) { event.preventDefault(); more.click(); }
+  });
+}
+
 function installListeners() {
+  installFullNavigationHandlers();
   document.querySelectorAll('#dashboard .card.metric').forEach((card) => {
     const label = card.querySelector('.metriclabel')?.textContent.toLowerCase() || '';
     const destination = label.includes('urgentes') ? 'claims' : label.includes('tareas') ? 'tasks' : label.includes('aprobar') ? 'approvals' : label.includes('pagos') ? 'accounting' : 'claims';
@@ -1213,12 +1549,25 @@ function installListeners() {
       applyClaimColumns(); save(); document.getElementById('modalback').classList.remove('show'); delete body.dataset.formAction;
       toast('Columnas actualizadas en esta vista local · Demo'); return;
     }
+    if (action === 'local-file') {
+      const file = body.querySelector('input[type="file"]')?.files?.[0];
+      document.getElementById('modalback').classList.remove('show'); delete body.dataset.formAction;
+      toast(file ? `${file.name} revisado localmente · no se subió` : 'Vista previa cerrada · no se seleccionó ningún archivo'); return;
+    }
     if (action === 'module-filter') {
       const query = body.querySelector('[data-field="query"]')?.value.trim() || '';
       const screenId = body.dataset.screenId;
       state.moduleFilters ||= {}; state.moduleFilters[screenId] = query; save(); applyModuleFilter(screenId, query);
       document.getElementById('modalback').classList.remove('show'); delete body.dataset.formAction; delete body.dataset.screenId;
       toast(query ? `Filtro local aplicado · ${query}` : 'Filtro local restablecido'); return;
+    }
+    if (action === 'data-view') {
+      const input = body.querySelector('[data-field="name"]');
+      if (!input?.checkValidity()) { input?.reportValidity(); input?.focus(); return; }
+      state.savedDataViews ||= [];
+      state.savedDataViews.unshift({ id: makeId('DV'), name: input.value.trim(), query: state.moduleFilters?.customdata || '', createdAt: now() });
+      logActivity('data-view-created', `Vista local creada: ${input.value.trim()}`, state.savedDataViews[0].id); save(); renderSavedDataViews();
+      document.getElementById('modalback').classList.remove('show'); delete body.dataset.formAction; toast(`Vista “${input.value.trim()}” guardada localmente`); return;
     }
     const kind = formMarkup[action].kind;
     const editId = body.dataset.editId;
