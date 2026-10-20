@@ -111,3 +111,10 @@ Inventario del prototipo, complementado con recorrido en navegador. Los recuento
 ### Alcance de verificación
 
 El build de producción pasa y la pasada de navegador cubre rutas, escenarios, persistencia, Document Studio, roles, tarea, claim y tamaños de viewport mencionados. No constituye una prueba exhaustiva de cada combinación posible de cada control; el inventario mantiene esa distinción. El estado, auditoría y documentos generados son locales al navegador y desaparecen al usar “Restablecer demo”.
+
+## Dashboard · rediseño visual Apple
+
+- Reorganicé la página para presentar encabezado, 5 KPIs y Claim command center primero; los widgets de equipo, calendario, flujo, inbox, inteligencia, tareas, recorrido guiado, escenarios y actividad siguen disponibles en el mismo dashboard debajo.
+- Apliqué jerarquía tipográfica del sistema, fondo/superficies neutras, tarjetas blancas más calmadas, acento azul en las acciones principales y mejores tamaños de lectura para tabla, foco, calendario y tablero. Las acciones y datos siguen siendo de demostración.
+- Escritorio usa una cuadrícula de 12 columnas; tablet se adapta a dos columnas y móvil a una columna, con KPIs en dos columnas.
+- Recorrido visual en Chrome DevTools a 1440, 1024, 768, 390 y 320 px: Dashboard visible, sin desbordamiento horizontal, con cinco KPIs y cuadrícula adaptada. Consola: sin errores/advertencias.
