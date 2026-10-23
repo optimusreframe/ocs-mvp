@@ -1,0 +1,599 @@
+openapi: 3.1.0
+info:
+  title: OCS Core API (draft)
+  version: 0.1.0-draft
+  description: >-
+    Provider-neutral contract proposal for the first OCS vertical slice.
+    Not deployed, approved, or a promise of current functionality. Tenant and
+    object authorization must be enforced by the server on every operation.
+servers:
+  - url: https://api.example.invalid/v1
+    description: Placeholder only; no OCS production API exists.
+security:
+  - sessionBearer: []
+tags:
+  - name: Agency
+  - name: Clients
+  - name: Claims
+  - name: Tasks
+  - name: Documents
+  - name: Customer portal
+  - name: Activity
+paths:
+  /agency:
+    get:
+      tags: [Agency]
+      operationId: getCurrentAgency
+      summary: Read agency context for the authenticated membership
+      responses:
+        '200': { description: Authorized agency context, content: { application/json: { schema: { $ref: '#/components/schemas/Agency' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agency/invitations:
+    post:
+      tags: [Agency]
+      operationId: inviteAgencyMember
+      summary: Invite a member; does not grant access until invitation is accepted
+      description: Requires agency.members.invite. Email delivery is a separate gated effect; this operation may create a pending invitation only.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationCreate' }
+      responses:
+        '202': { description: Invitation pending; delivery may be unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Invitation' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /clients:
+    get:
+      tags: [Clients]
+      operationId: listClients
+      summary: List clients visible to the current actor
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+      responses:
+        '200': { description: Tenant-scoped page, content: { application/json: { schema: { $ref: '#/components/schemas/ClientPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Clients]
+      operationId: createClient
+      summary: Create a client in the caller's active agency
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientCreate' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Client' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /properties:
+    post:
+      tags: [Clients]
+      operationId: createProperty
+      summary: Create a property record in the active agency
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PropertyCreate' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Property' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /policies:
+    post:
+      tags: [Clients]
+      operationId: createPolicy
+      summary: Register a policy for a client and property
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PolicyCreate' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Policy' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /claims:
+    get:
+      tags: [Claims]
+      operationId: listClaims
+      summary: Search claims within authorized scope
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: status, in: query, schema: { type: string, enum: [open, closed] } }
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+      responses:
+        '200': { description: Authorized tenant-scoped page, content: { application/json: { schema: { $ref: '#/components/schemas/ClaimPage' } } }}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Claims]
+      operationId: createClaim
+      summary: Create a claim; ID and initial stage are assigned by OCS
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClaimCreate' }
+      responses:
+        '201': { description: Created with audit event, content: { application/json: { schema: { $ref: '#/components/schemas/Claim' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /claims/{claimId}:
+    parameters:
+      - $ref: '#/components/parameters/ClaimId'
+    get:
+      tags: [Claims]
+      operationId: getClaim
+      summary: Read a claim and its authorized summary
+      responses:
+        '200': { description: Claim, headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Claim' } } }}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Claims]
+      operationId: updateClaim
+      summary: Update editable claim fields using optimistic concurrency
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string }, description: ETag returned by the latest read }
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/ClaimUpdate' }
+      responses:
+        '200': { description: Updated and audited, headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Claim' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /claims/{claimId}/transitions:
+    parameters:
+      - $ref: '#/components/parameters/ClaimId'
+    post:
+      tags: [Claims]
+      operationId: transitionClaim
+      summary: Request an allowed workflow transition
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionRequest' }
+      responses:
+        '200': { description: Transition applied and audited, content: { application/json: { schema: { $ref: '#/components/schemas/Claim' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /claims/{claimId}/assignments:
+    parameters:
+      - $ref: '#/components/parameters/ClaimId'
+    post:
+      tags: [Claims]
+      operationId: assignClaim
+      summary: Assign claim responsibility to an active agency membership
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignmentRequest' }
+      responses:
+        '200': { description: Assignment applied and audited, content: { application/json: { schema: { $ref: '#/components/schemas/Claim' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /tasks:
+    post:
+      tags: [Tasks]
+      operationId: createTask
+      summary: Create and assign a task within an authorized claim
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskCreate' }
+      responses:
+        '201': { description: Created and audited, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /tasks/{taskId}:
+    patch:
+      tags: [Tasks]
+      operationId: updateTask
+      summary: Update task state or assignment using optimistic concurrency
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/TaskUpdate' }
+      responses:
+        '200': { description: Updated and audited, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /claims/{claimId}/documents:
+    parameters:
+      - $ref: '#/components/parameters/ClaimId'
+    post:
+      tags: [Documents]
+      operationId: createClaimDocumentMetadata
+      summary: Register document metadata; binary upload is a separate storage contract
+      description: A newly registered document is internal and unpublished by default. No public URL or direct binary upload is defined in this draft.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentCreate' }
+      responses:
+        '201': { description: Metadata created, content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /claims/{claimId}/documents/{documentId}/publication:
+    put:
+      tags: [Documents]
+      operationId: setDocumentPublication
+      summary: Publish or revoke customer visibility for a document
+      description: Requires documents.publish and current claim/document authorization. Validates classification and target policyholder relationship; every change is audited.
+      parameters:
+        - $ref: '#/components/parameters/ClaimId'
+        - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublicationRequest' }
+      responses:
+        '200': { description: Visibility changed and audited, content: { application/json: { schema: { $ref: '#/components/schemas/Publication' } } }}
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /portal/claims:
+    get:
+      tags: [Customer portal]
+      operationId: listPortalClaims
+      summary: List claims linked to the authenticated policyholder
+      description: Actor is resolved from portal identity and explicit membership; client-supplied customer or agency IDs are not accepted.
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 25 } }
+      responses:
+        '200': { description: Only linked claims and customer-visible fields, content: { application/json: { schema: { $ref: '#/components/schemas/PortalClaimPage' } } }}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /activity:
+    get:
+      tags: [Activity]
+      operationId: listActivity
+      summary: Read authorized audit summaries
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: claimId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Authorized, minimized event page, content: { application/json: { schema: { $ref: '#/components/schemas/AuditPage' } } }}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+components:
+  securitySchemes:
+    sessionBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-or-jwt
+      description: Placeholder transport contract. Identity provider, session design and token format require Phase 2 ADR approval.
+  parameters:
+    ClaimId:
+      name: claimId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128 }
+  responses:
+    Unauthorized: { description: Authentication required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Forbidden: { description: Not authorized; response must not reveal inaccessible resource data, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    NotFound: { description: Resource not found or not visible in caller scope, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Conflict: { description: State or idempotency conflict, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    PreconditionFailed: { description: ETag stale; no mutation performed, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    ValidationError: { description: Input invalid; no partial mutation, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Unprocessable: { description: Input is syntactically valid but violates current workflow or business preconditions; no mutation, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  schemas:
+    Agency:
+      type: object
+      required: [id, displayName, status]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        status: { type: string, enum: [active, suspended] }
+    InvitationCreate:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        role: { type: string, enum: [adjuster, assistant, accounting] }
+    Invitation:
+      type: object
+      required: [id, role, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        role: { type: string }
+        status: { type: string, enum: [pending, accepted, revoked, expired] }
+        createdAt: { type: string, format: date-time }
+    ClientCreate:
+      type: object
+      additionalProperties: false
+      required: [givenName, familyName]
+      properties:
+        givenName: { type: string, minLength: 1, maxLength: 100 }
+        familyName: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: [string, 'null'], format: email, maxLength: 254 }
+        phone: { type: [string, 'null'], maxLength: 32 }
+    Client:
+      allOf:
+        - $ref: '#/components/schemas/ClientCreate'
+        - type: object
+          required: [id, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+    ClientPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Client' } }
+        nextCursor: { type: [string, 'null'] }
+    PropertyCreate:
+      type: object
+      additionalProperties: false
+      required: [clientId, addressLine1, city, region, postalCode]
+      properties:
+        clientId: { type: string, format: uuid }
+        addressLine1: { type: string, minLength: 1, maxLength: 200 }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        region: { type: string, minLength: 2, maxLength: 2 }
+        postalCode: { type: string, maxLength: 16 }
+    Property:
+      allOf:
+        - $ref: '#/components/schemas/PropertyCreate'
+        - type: object
+          required: [id]
+          properties: { id: { type: string, format: uuid } }
+    PolicyCreate:
+      type: object
+      additionalProperties: false
+      required: [clientId, propertyId, carrierName, policyNumber, effectiveDate]
+      properties:
+        clientId: { type: string, format: uuid }
+        propertyId: { type: string, format: uuid }
+        carrierName: { type: string, minLength: 1, maxLength: 120 }
+        policyNumber: { type: string, minLength: 1, maxLength: 100, writeOnly: true }
+        effectiveDate: { type: string, format: date }
+        expirationDate: { type: [string, 'null'], format: date }
+    Policy:
+      type: object
+      required: [id, clientId, propertyId, carrierName, effectiveDate]
+      properties:
+        id: { type: string, format: uuid }
+        clientId: { type: string, format: uuid }
+        propertyId: { type: string, format: uuid }
+        carrierName: { type: string }
+        effectiveDate: { type: string, format: date }
+        expirationDate: { type: [string, 'null'], format: date }
+    ClaimCreate:
+      type: object
+      additionalProperties: false
+      required: [clientId, propertyId, lossType, lossDate]
+      properties:
+        clientId: { type: string, format: uuid }
+        propertyId: { type: string, format: uuid }
+        policyId: { type: [string, 'null'], format: uuid }
+        lossType: { type: string, enum: [water, mold, wind, hurricane, fire, other] }
+        lossDate: { type: string, format: date }
+        region: { type: string, minLength: 2, maxLength: 2 }
+    ClaimUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        lossType: { type: string, enum: [water, mold, wind, hurricane, fire, other] }
+        lossDate: { type: string, format: date }
+    Claim:
+      type: object
+      required: [id, clientId, propertyId, lossType, lossDate, stage, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        clientId: { type: string, format: uuid }
+        propertyId: { type: string, format: uuid }
+        policyId: { type: [string, 'null'], format: uuid }
+        lossType: { type: string }
+        lossDate: { type: string, format: date }
+        stage: { type: string }
+        status: { type: string, enum: [open, closed] }
+        createdAt: { type: string, format: date-time }
+    ClaimPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Claim' } }
+        nextCursor: { type: [string, 'null'] }
+    TransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [transitionKey]
+      properties:
+        transitionKey: { type: string, minLength: 1, maxLength: 80 }
+        reason: { type: [string, 'null'], maxLength: 500 }
+    AssignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [membershipId]
+      properties:
+        membershipId: { type: string, format: uuid }
+    TaskCreate:
+      type: object
+      additionalProperties: false
+      required: [claimId, title, assigneeMembershipId]
+      properties:
+        claimId: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        assigneeMembershipId: { type: string, format: uuid }
+        dueAt: { type: [string, 'null'], format: date-time }
+        priority: { type: string, enum: [low, normal, high, urgent], default: normal }
+    Task:
+      allOf:
+        - $ref: '#/components/schemas/TaskCreate'
+        - type: object
+          required: [id, status, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, enum: [open, in_progress, blocked, done, cancelled] }
+            createdAt: { type: string, format: date-time }
+    TaskUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        assigneeMembershipId: { type: string, format: uuid }
+        dueAt: { type: [string, 'null'], format: date-time }
+        priority: { type: string, enum: [low, normal, high, urgent] }
+        status: { type: string, enum: [open, in_progress, blocked, done, cancelled] }
+    DocumentCreate:
+      type: object
+      additionalProperties: false
+      required: [fileName, mediaType, classification]
+      properties:
+        fileName: { type: string, minLength: 1, maxLength: 255 }
+        mediaType: { type: string, maxLength: 127 }
+        byteSize: { type: integer, minimum: 0, maximum: 52428800 }
+        classification: { type: string, enum: [internal, customer_shareable, restricted] }
+    Document:
+      allOf:
+        - $ref: '#/components/schemas/DocumentCreate'
+        - type: object
+          required: [id, version, visibility, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer, minimum: 1 }
+            visibility: { type: string, enum: [internal, customer] }
+            createdAt: { type: string, format: date-time }
+    PublicationRequest:
+      type: object
+      additionalProperties: false
+      required: [visibility, policyholderId]
+      properties:
+        visibility: { type: string, enum: [internal, customer] }
+        policyholderId: { type: string, format: uuid }
+    Publication:
+      type: object
+      required: [documentId, visibility, policyholderId, updatedAt]
+      properties:
+        documentId: { type: string, format: uuid }
+        visibility: { type: string, enum: [internal, customer] }
+        policyholderId: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    PortalClaimPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, lossType, lossDate, stage, documents]
+            properties:
+              id: { type: string, format: uuid }
+              lossType: { type: string }
+              lossDate: { type: string, format: date }
+              stage: { type: string }
+              documents: { type: array, items: { $ref: '#/components/schemas/PortalDocument' } }
+        nextCursor: { type: [string, 'null'] }
+    PortalDocument:
+      type: object
+      required: [id, fileName, version]
+      properties:
+        id: { type: string, format: uuid }
+        fileName: { type: string }
+        version: { type: integer }
+    AuditPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, action, occurredAt, result]
+            properties:
+              id: { type: string, format: uuid }
+              action: { type: string }
+              objectType: { type: string }
+              objectId: { type: string, format: uuid }
+              occurredAt: { type: string, format: date-time }
+              result: { type: string, enum: [success, denied, failure] }
+        nextCursor: { type: [string, 'null'] }
+    Problem:
+      type: object
+      required: [type, title, status, traceId]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string, maxLength: 1000 }
+        traceId: { type: string, format: uuid }
+        fieldErrors:
+          type: object
+          additionalProperties: { type: array, items: { type: string, maxLength: 300 } }

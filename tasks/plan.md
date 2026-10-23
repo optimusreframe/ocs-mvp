@@ -56,11 +56,15 @@ Browser / PWA
 
 ### Fase 1 — Contrato de producto y dominio (activa)
 
-- [ ] Clasificar cada módulo: Release 1 / posterior / solo lectura / retirado.
-- [ ] Establecer perfiles, acciones y matrices de permisos por actor y agencia.
-- [ ] Formalizar entidades, relaciones, estados, invariantes, retención y fuentes de verdad.
-- [ ] Definir journeys y criterios observables del primer release.
+Artefactos de trabajo: [`product-scope.md`](./product-scope.md) (propuesta de alcance para 40 destinos), [`domain-model.md`](./domain-model.md) (modelo conceptual), [`domain-states.md`](./domain-states.md) (estados/eventos), [`permission-matrix.md`](./permission-matrix.md) (matriz de capacidades), [`contracts/ocs-core-api-draft.yaml`](./contracts/ocs-core-api-draft.yaml) (contrato REST proveedor-neutral), [`threat-model.md`](./threat-model.md) (amenazas y controles), [`acceptance/core-vertical-slice.md`](./acceptance/core-vertical-slice.md) (casos automatizables). Todo está en borrador y pendiente de aprobación; no autoriza servicios de producción ni tratamiento de datos reales.
+
+- [x] Proponer clasificación de los 40 destinos (Release 1 / posterior / solo lectura / gated) en `product-scope.md`; requiere ratificación antes de fijar el release.
+- [x] Proponer perfiles y capacidades por actor en `permission-matrix.md`; validar alcance y excepciones con stakeholders antes de implementación.
+- [x] Proponer entidades, relaciones, estados, invariantes, retención y fuentes de verdad en los artefactos; ratificación legal/operativa pendiente.
+- [x] Proponer journeys y criterios observables en `acceptance/core-vertical-slice.md`; ejecutar tras aprobar y construir API/staging.
 - [ ] Resolver decisiones comerciales/operativas que cambian arquitectura sin conectar cuentas.
+
+El contrato API es una herramienta para revisar el journey, no una decisión de auth, hosting, persistencia o stack. Fase 2 debe revisar y ampliar versionado, errores, límites, auditoría, jobs y amenazas antes de implementarlo.
 
 **Entregables:** matriz de alcance, modelo conceptual, matriz de roles, catálogo de eventos/estados, acceptance pack.
 
@@ -71,6 +75,8 @@ Browser / PWA
 - [ ] Datos sensibles y acciones públicas identificados.
 
 ### Fase 2 — Arquitectura, amenazas y ADRs
+
+El modelo de amenazas [`threat-model.md`](./threat-model.md) es un borrador preparatorio en Fase 1; el gate de producto y la revisión formal de seguridad siguen pendientes.
 
 - [ ] Elegir (y documentar) modelo de entrega, framework, runtime, DB, cloud/región, auth, storage y vendors.
 - [ ] Modelo de amenazas y abuso: acceso entre agencias, portal, archivos, IA, sesiones, webhooks, importaciones.
