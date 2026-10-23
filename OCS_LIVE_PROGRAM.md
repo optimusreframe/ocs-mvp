@@ -2,7 +2,7 @@
 
 **Objetivo:** llevar OCS desde el MVP demostrativo actual hasta una plataforma full stack lista para operar en producción, registrando cada fase, su evidencia, bloqueos y siguiente paso.
 
-**Goal persistente de Codex:** activo · el objetivo de esta tarea está conectado con este programa.
+**Goal persistente:** activo · el objetivo de esta tarea está conectado con este programa.
 
 **Estado al 2026-10-23:** Fase 0 completada como demo; Fase 1 activa. La aplicación publicada sigue siendo una demo estática sin backend.
 
